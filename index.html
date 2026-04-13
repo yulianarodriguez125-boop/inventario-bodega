@@ -300,7 +300,7 @@
       <a class="nav-item active" data-page="dashboard" onclick="goPage('dashboard')"><span class="icon">📊</span> Panel Principal</a>
       <a class="nav-item" data-page="inventario" onclick="goPage('inventario')"><span class="icon">📦</span> Inventario</a>
       <a class="nav-item" data-page="salidas" onclick="goPage('salidas')"><span class="icon">📤</span> Movimientos / Salidas</a>
-      <a class="nav-item" data-page="importar" onclick="goPage('importar')"><span class="icon">📥</span> Importar Excel</a>
+      <a class="nav-item no-visor" data-page="importar" onclick="goPage('importar')"><span class="icon">📥</span> Importar Excel</a>
       <div class="nav-section">Gestión</div>
       <a class="nav-item admin-only" data-page="usuarios" onclick="goPage('usuarios')"><span class="icon">👥</span> Usuarios</a>
       <a class="nav-item" data-page="exportar" onclick="goPage('exportar')"><span class="icon">📊</span> Exportar / Reportes</a>
@@ -321,8 +321,8 @@
     <div id="topbar">
       <h2 id="page-title">Panel Principal</h2>
       <div style="display:flex;align-items:center;gap:8px">
-        <button class="btn btn-primary" id="btn-add-inv" onclick="openAddModal()" style="display:none">➕ Agregar Material</button>
-        <button class="btn btn-warning" id="btn-add-salida-top" onclick="openSalidaModal(null)" style="display:none">📤 Registrar Salida</button>
+        <button class="btn btn-primary no-visor" id="btn-add-inv" onclick="openAddModal()" style="display:none">➕ Agregar Material</button>
+        <button class="btn btn-warning no-visor" id="btn-add-salida-top" onclick="openSalidaModal(null)" style="display:none">📤 Registrar Salida</button>
         <span id="user-role-badge" class="badge badge-blue" style="font-size:11px"></span>
       </div>
     </div>
@@ -392,7 +392,7 @@
             <h3>📤 Registro de Salidas</h3>
             <div class="filters-bar">
               <div class="search-wrap"><span class="si">🔍</span><input type="text" id="sal-search" placeholder="Buscar..." oninput="filterSalidas()"></div>
-              <button class="btn btn-warning" onclick="openSalidaModal(null)">📤 Registrar Salida</button>
+              <button class="btn btn-warning no-visor" onclick="openSalidaModal(null)">📤 Registrar Salida</button>
             </div>
           </div>
           <div class="table-wrap">
@@ -623,7 +623,7 @@
       <div class="form-field" style="margin-bottom:12px"><label>Nombre completo <span class="required">*</span></label><input type="text" id="u-nombre" placeholder="Nombre"></div>
       <div class="form-field" style="margin-bottom:12px"><label>Correo <span class="required">*</span></label><input type="email" id="u-email" placeholder="correo@empresa.com"></div>
       <div class="form-field" style="margin-bottom:12px" id="u-pass-field"><label>Contraseña <span class="required">*</span></label><input type="password" id="u-pass" placeholder="Mínimo 6 caracteres"><span class="hint" style="font-size:11px;color:#64748b;margin-top:2px;display:block">El usuario puede cambiarla después</span></div>
-      <div class="form-field"><label>Rol</label><select id="u-rol"><option value="usuario">Usuario (ver y agregar)</option><option value="admin">Administrador (acceso total)</option></select></div>
+      <div class="form-field"><label>Rol</label><select id="u-rol"><option value="visor">Solo lectura (solo puede ver)</option><option value="usuario">Editor (puede agregar y editar)</option><option value="admin">Administrador (acceso total)</option></select></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeModal('modal-user')">Cancelar</button>
@@ -727,10 +727,15 @@ async function loadUserProfile(){
 function setupUI(){
   const n=currentUserProfile.nombre||currentUserProfile.email;
   setText('user-name-sidebar',n); setText('user-email-sidebar',currentUserProfile.email); setText('user-avatar',n[0].toUpperCase());
-  const isAdmin=currentUserProfile.rol==='admin';
-  setText('user-role-badge',isAdmin?'👑 Admin':'👤 Usuario');
-  document.getElementById('user-role-badge').className='badge '+(isAdmin?'badge-orange':'badge-blue');
+  const rol=currentUserProfile.rol||'usuario';
+  const isAdmin=rol==='admin';
+  const isVisor=rol==='visor';
+  const roleLabels={admin:'👑 Admin',usuario:'✏️ Editor',visor:'👁️ Solo lectura'};
+  const roleBadgeColors={admin:'badge-orange',usuario:'badge-blue',visor:'badge-blue'};
+  setText('user-role-badge',roleLabels[rol]||'👤 Usuario');
+  document.getElementById('user-role-badge').className='badge '+(roleBadgeColors[rol]||'badge-blue');
   document.querySelectorAll('.admin-only').forEach(el=>el.style.display=isAdmin?'flex':'none');
+  document.querySelectorAll('.no-visor').forEach(el=>el.style.display=isVisor?'none':'');
 }
  
 // NAVIGATION
@@ -815,6 +820,7 @@ function getFilteredInv(){
 }
 function filterInv(){ invPage=1; renderInv(getFilteredInv()); }
 function renderInv(recs){
+  const isVisor=(currentUserProfile&&currentUserProfile.rol)==='visor';
   const tbody=document.getElementById('inv-tbody');
   const total=recs.length, pages=Math.ceil(total/PER)||1;
   invPage=Math.min(invPage,pages);
@@ -833,10 +839,10 @@ function renderInv(recs){
       <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(m.notas||'')}">${esc(m.notas||'—')}</td>
       <td>
         <div style="display:flex;gap:4px;flex-wrap:wrap">
-          <button class="btn btn-warning btn-sm" onclick="openSalidaModal('${m.id}')">📤 Salida</button>
+          ${!isVisor?`<button class="btn btn-warning btn-sm" onclick="openSalidaModal('${m.id}')">📤 Salida</button>`:''}
           <button class="btn btn-outline btn-sm" onclick="verSalidas('${m.id}')">📋 Ver salidas</button>
-          <button class="btn btn-outline btn-sm" onclick="editMat('${m.id}')">✏️</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteMat('${m.id}','${esc(m.material)}')">🗑️</button>
+          ${!isVisor?`<button class="btn btn-outline btn-sm" onclick="editMat('${m.id}')">✏️</button>`:''}
+          ${!isVisor?`<button class="btn btn-danger btn-sm" onclick="deleteMat('${m.id}','${esc(m.material)}')">🗑️</button>`:''}
         </div>
       </td>
     </tr>`;
@@ -851,6 +857,7 @@ function getFilteredSalidas(){
 }
 function filterSalidas(){ salPage=1; renderSalidas(getFilteredSalidas()); }
 function renderSalidas(recs){
+  const isVisor=(currentUserProfile&&currentUserProfile.rol)==='visor';
   const tbody=document.getElementById('sal-tbody');
   const total=recs.length, pages=Math.ceil(total/PER)||1;
   salPage=Math.min(salPage,pages);
@@ -865,8 +872,9 @@ function renderSalidas(recs){
     <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.notas||'')}">${esc(s.notas||'—')}</td>
     <td>
       <div style="display:flex;gap:4px">
-        <button class="btn btn-outline btn-sm" onclick="editSalida('${s.id}')">✏️</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteSalida('${s.id}','${esc(s.material)}','${s.cantidad}')">🗑️</button>
+        ${!isVisor?`<button class="btn btn-outline btn-sm" onclick="editSalida('${s.id}')">✏️</button>`:''}
+        ${!isVisor?`<button class="btn btn-danger btn-sm" onclick="deleteSalida('${s.id}','${esc(s.material)}','${s.cantidad}')">🗑️</button>`:''}
+        ${isVisor?`<span style="font-size:12px;color:#94a3b8">—</span>`:''}
       </div>
     </td>
   </tr>`).join('');
