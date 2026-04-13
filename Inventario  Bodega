@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control de Inventario - Bodega</title>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js" crossorigin="anonymous"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js" crossorigin="anonymous"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --primary: #1e3a5f; --primary-light: #2563eb; --accent: #f97316;
+      --success: #16a34a; --danger: #dc2626; --warning: #d97706;
+      --bg: #f1f5f9; --card: #ffffff; --text: #1e293b; --text-light: #64748b;
+      --border: #e2e8f0; --sidebar-w: 245px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+ 
+    /* SETUP */
+    #setup-screen { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#1e3a5f,#2563eb); }
+    .setup-card { background:white; border-radius:16px; padding:36px; width:100%; max-width:600px; box-shadow:0 20px 60px rgba(0,0,0,.3); margin:20px; }
+    .setup-logo { text-align:center; margin-bottom:20px; }
+    .setup-logo h1 { color:var(--primary); font-size:20px; margin-top:6px; }
+    .setup-logo p { color:var(--text-light); font-size:13px; }
+    .setup-step { background:#f8fafc; border-radius:10px; padding:14px; margin-bottom:12px; border-left:4px solid var(--accent); }
+    .setup-step h3 { font-size:13px; font-weight:700; color:var(--primary); margin-bottom:5px; }
+    .setup-step p { font-size:12px; color:var(--text-light); line-height:1.5; }
+    .setup-step a { color:var(--primary-light); }
+    .setup-fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+    .setup-fields .full { grid-column:1/-1; }
+    .setup-fields label { font-size:12px; font-weight:600; color:var(--text); margin-bottom:3px; display:block; }
+    .setup-fields input { width:100%; padding:9px 11px; border:1.5px solid var(--border); border-radius:8px; font-size:13px; }
+    .setup-fields input:focus { outline:none; border-color:var(--primary-light); }
+    .btn-setup { width:100%; padding:13px; background:var(--primary); color:white; border:none; border-radius:10px; font-size:15px; font-weight:600; cursor:pointer; margin-top:14px; }
+    .btn-setup:hover { background:var(--primary-light); }
+    .setup-error { background:#fef2f2; color:var(--danger); border-radius:8px; padding:10px 14px; font-size:13px; margin-top:10px; display:none; }
+ 
+    /* LOGIN */
+    #login-screen { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#1e3a5f,#2563eb); }
+    .login-card { background:white; border-radius:16px; padding:38px; width:100%; max-width:400px; box-shadow:0 20px 60px rgba(0,0,0,.3); margin:20px; }
+    .login-logo { text-align:center; margin-bottom:28px; }
+    .login-logo .icon { font-size:46px; }
+    .login-logo h1 { color:var(--primary); font-size:22px; font-weight:700; margin-top:8px; }
+    .login-logo p { color:var(--text-light); font-size:13px; margin-top:3px; }
+    .form-group { margin-bottom:14px; }
+    .form-group label { font-size:13px; font-weight:600; color:var(--text); margin-bottom:5px; display:block; }
+    .form-group input { width:100%; padding:11px 13px; border:1.5px solid var(--border); border-radius:10px; font-size:14px; }
+    .form-group input:focus { outline:none; border-color:var(--primary-light); box-shadow:0 0 0 3px rgba(37,99,235,.1); }
+    .btn-login { width:100%; padding:13px; background:var(--primary); color:white; border:none; border-radius:10px; font-size:15px; font-weight:600; cursor:pointer; }
+    .btn-login:hover { background:var(--primary-light); }
+    .btn-login:disabled { background:#94a3b8; cursor:not-allowed; }
+    .login-error { background:#fef2f2; color:var(--danger); border-radius:8px; padding:10px 14px; font-size:13px; margin-top:10px; display:none; }
+    .forgot-link { text-align:center; margin-top:14px; font-size:13px; color:var(--text-light); }
+    .forgot-link a { color:var(--primary-light); cursor:pointer; }
+ 
+    /* MAIN */
+    #main-app { display:flex; min-height:100vh; }
+    #sidebar { width:var(--sidebar-w); background:var(--primary); color:white; display:flex; flex-direction:column; position:fixed; top:0; left:0; height:100vh; z-index:100; }
+    .sidebar-header { padding:18px 15px; border-bottom:1px solid rgba(255,255,255,.1); }
+    .sidebar-header .logo { font-size:12px; opacity:.7; }
+    .sidebar-header h2 { font-size:15px; font-weight:700; margin-top:3px; }
+    .sidebar-nav { flex:1; padding:10px 0; overflow-y:auto; }
+    .nav-item { display:flex; align-items:center; gap:9px; padding:10px 15px; cursor:pointer; font-size:13px; font-weight:500; border-left:3px solid transparent; color:rgba(255,255,255,.8); text-decoration:none; }
+    .nav-item:hover { background:rgba(255,255,255,.1); color:white; }
+    .nav-item.active { background:rgba(255,255,255,.15); color:white; border-left-color:var(--accent); }
+    .nav-item .icon { font-size:17px; }
+    .nav-section { padding:7px 15px 3px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; opacity:.5; margin-top:6px; }
+    .sidebar-footer { padding:14px; border-top:1px solid rgba(255,255,255,.1); }
+    .user-info { display:flex; align-items:center; gap:9px; margin-bottom:10px; }
+    .user-avatar { width:34px; height:34px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; flex-shrink:0; }
+    .user-name { font-size:13px; font-weight:600; }
+    .user-email { font-size:11px; opacity:.7; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:155px; }
+    .btn-logout { width:100%; padding:8px; background:rgba(255,255,255,.1); color:white; border:1px solid rgba(255,255,255,.2); border-radius:8px; font-size:13px; cursor:pointer; }
+    .btn-logout:hover { background:rgba(255,255,255,.2); }
+    #content { margin-left:var(--sidebar-w); flex:1; display:flex; flex-direction:column; }
+    #topbar { background:white; padding:0 22px; height:58px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); position:sticky; top:0; z-index:50; }
+    #topbar h2 { font-size:17px; font-weight:700; }
+    #page-content { padding:22px; flex:1; }
+    .page { display:none; }
+    .page.active { display:block; }
+ 
+    /* STATS */
+    .stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:20px; }
+    .stat-card { background:white; border-radius:12px; padding:18px; border:1px solid var(--border); }
+    .stat-card .stat-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text-light); }
+    .stat-card .stat-value { font-size:30px; font-weight:700; margin:5px 0 2px; }
+    .stat-card .stat-sub { font-size:12px; color:var(--text-light); }
+    .stat-card.blue .stat-value { color:var(--primary-light); }
+    .stat-card.green .stat-value { color:var(--success); }
+    .stat-card.orange .stat-value { color:var(--accent); }
+    .stat-card.red .stat-value { color:var(--danger); }
+ 
+    /* CARD */
+    .card { background:white; border-radius:12px; border:1px solid var(--border); margin-bottom:18px; }
+    .card-header { padding:14px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+    .card-header h3 { font-size:14px; font-weight:700; }
+    .card-body { padding:18px; }
+ 
+    /* TABLE */
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th { text-align:left; padding:9px 12px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text-light); background:#f8fafc; border-bottom:1px solid var(--border); white-space:nowrap; }
+    td { padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    tr:last-child td { border-bottom:none; }
+    tr:hover td { background:#f8fafc; }
+    .empty-table { text-align:center; padding:36px; color:var(--text-light); font-size:14px; }
+    .loading { display:flex; align-items:center; justify-content:center; padding:36px; gap:8px; color:var(--text-light); }
+    .spinner { width:18px; height:18px; border:3px solid var(--border); border-top-color:var(--primary-light); border-radius:50%; animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+ 
+    /* DISPONIBLE INDICATOR */
+    .disponible-bar { display:flex; align-items:center; gap:8px; }
+    .disponible-num { font-weight:700; font-size:14px; }
+    .disponible-num.ok { color:var(--success); }
+    .disponible-num.low { color:var(--warning); }
+    .disponible-num.empty { color:var(--danger); }
+ 
+    /* BADGE */
+    .badge { display:inline-flex; align-items:center; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; white-space:nowrap; }
+    .badge-green { background:#dcfce7; color:#15803d; }
+    .badge-orange { background:#fff7ed; color:#c2410c; }
+    .badge-blue { background:#dbeafe; color:#1d4ed8; }
+    .badge-red { background:#fee2e2; color:#b91c1c; }
+    .badge-gray { background:#f1f5f9; color:#475569; }
+ 
+    /* BUTTONS */
+    .btn { display:inline-flex; align-items:center; gap:5px; padding:8px 14px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; border:none; transition:all .15s; white-space:nowrap; }
+    .btn-primary { background:var(--primary); color:white; }
+    .btn-primary:hover { background:var(--primary-light); }
+    .btn-success { background:var(--success); color:white; }
+    .btn-success:hover { background:#15803d; }
+    .btn-danger { background:var(--danger); color:white; }
+    .btn-danger:hover { background:#b91c1c; }
+    .btn-warning { background:var(--warning); color:white; }
+    .btn-warning:hover { background:#b45309; }
+    .btn-outline { background:white; color:var(--text); border:1.5px solid var(--border); }
+    .btn-outline:hover { background:var(--bg); border-color:var(--primary-light); }
+    .btn-sm { padding:5px 10px; font-size:11px; }
+ 
+    /* FILTERS */
+    .filters-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .search-wrap { position:relative; }
+    .search-wrap input { padding:8px 11px 8px 33px; border:1.5px solid var(--border); border-radius:8px; font-size:13px; width:220px; }
+    .search-wrap input:focus { outline:none; border-color:var(--primary-light); }
+    .search-wrap .si { position:absolute; left:9px; top:50%; transform:translateY(-50%); color:var(--text-light); font-size:13px; }
+    .filter-select { padding:8px 11px; border:1.5px solid var(--border); border-radius:8px; font-size:13px; background:white; cursor:pointer; color:var(--text); }
+    .filter-select:focus { outline:none; border-color:var(--primary-light); }
+ 
+    /* MODAL */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; display:none; align-items:center; justify-content:center; padding:18px; }
+    .modal-overlay.open { display:flex; }
+    .modal { background:white; border-radius:14px; width:100%; max-width:520px; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+    .modal-header { padding:18px 22px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; background:white; z-index:10; border-radius:14px 14px 0 0; }
+    .modal-header h3 { font-size:16px; font-weight:700; }
+    .modal-close { background:none; border:none; font-size:20px; cursor:pointer; color:var(--text-light); padding:3px; border-radius:5px; line-height:1; }
+    .modal-close:hover { background:var(--bg); }
+    .modal-body { padding:22px; }
+    .modal-footer { padding:14px 22px; border-top:1px solid var(--border); display:flex; gap:8px; justify-content:flex-end; }
+    .modal-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .modal-grid .full { grid-column:1/-1; }
+    .form-field { display:flex; flex-direction:column; gap:4px; }
+    .form-field label { font-size:12px; font-weight:600; color:var(--text); }
+    .form-field input,.form-field select,.form-field textarea { padding:9px 11px; border:1.5px solid var(--border); border-radius:8px; font-size:13px; font-family:inherit; background:white; }
+    .form-field input:focus,.form-field select:focus,.form-field textarea:focus { outline:none; border-color:var(--primary-light); box-shadow:0 0 0 3px rgba(37,99,235,.1); }
+    .form-field textarea { resize:vertical; min-height:65px; }
+    .form-field .hint { font-size:11px; color:var(--text-light); }
+    .required { color:var(--danger); }
+ 
+    /* CONFIRM */
+    #confirm-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:300; display:none; align-items:center; justify-content:center; padding:18px; }
+    #confirm-overlay.open { display:flex; }
+    .confirm-card { background:white; border-radius:14px; padding:26px; max-width:360px; width:100%; box-shadow:0 20px 60px rgba(0,0,0,.3); text-align:center; }
+    .confirm-icon { font-size:38px; margin-bottom:12px; }
+    .confirm-card h3 { font-size:16px; font-weight:700; margin-bottom:7px; }
+    .confirm-card p { font-size:13px; color:var(--text-light); margin-bottom:18px; }
+    .confirm-actions { display:flex; gap:8px; justify-content:center; }
+ 
+    /* TOAST */
+    #toast-container { position:fixed; bottom:22px; right:22px; z-index:400; display:flex; flex-direction:column; gap:7px; }
+    .toast { padding:11px 16px; border-radius:10px; font-size:13px; font-weight:500; color:white; box-shadow:0 4px 12px rgba(0,0,0,.2); animation:slideIn .3s ease; max-width:280px; display:flex; align-items:center; gap:7px; }
+    .toast.success { background:var(--success); }
+    .toast.error { background:var(--danger); }
+    .toast.info { background:var(--primary-light); }
+    @keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+ 
+    /* IMPORT */
+    .import-zone { border:2px dashed var(--border); border-radius:12px; padding:28px; text-align:center; cursor:pointer; background:#fafafa; }
+    .import-zone:hover { border-color:var(--primary-light); background:#eff6ff; }
+    .import-zone h4 { font-size:14px; margin:7px 0 3px; }
+    .import-zone p { font-size:12px; color:var(--text-light); }
+ 
+    /* SALIDAS PANEL */
+    .salidas-list { background:#f8fafc; border-radius:10px; padding:14px; margin-top:12px; }
+    .salida-item { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px; }
+    .salida-item:last-child { border-bottom:none; }
+    .salida-qty { font-weight:700; color:var(--danger); }
+    .salida-info { color:var(--text-light); font-size:11px; }
+ 
+    /* PAGINATION */
+    .pagination { display:flex; align-items:center; gap:5px; justify-content:flex-end; padding:12px 18px; border-top:1px solid var(--border); font-size:13px; }
+    .page-btn { padding:5px 11px; border:1.5px solid var(--border); border-radius:6px; background:white; cursor:pointer; font-size:12px; font-weight:500; }
+    .page-btn:hover { background:var(--bg); }
+    .page-btn.active { background:var(--primary); color:white; border-color:var(--primary); }
+    .page-btn:disabled { opacity:.4; cursor:not-allowed; }
+    .page-info { color:var(--text-light); font-size:12px; }
+ 
+    /* AUTOCOMPLETE */
+    .autocomplete-wrap { position:relative; }
+    .autocomplete-list { position:absolute; top:100%; left:0; right:0; background:white; border:1.5px solid var(--primary-light); border-top:none; border-radius:0 0 8px 8px; z-index:50; max-height:170px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.1); }
+    .autocomplete-item { padding:8px 11px; font-size:13px; cursor:pointer; }
+    .autocomplete-item:hover { background:#eff6ff; }
+ 
+    mark { background:#fef08a; border-radius:2px; padding:0 1px; }
+ 
+    @media(max-width:768px){
+      #sidebar{transform:translateX(-100%);}
+      #sidebar.open{transform:translateX(0);}
+      #content{margin-left:0;}
+      .modal-grid{grid-template-columns:1fr;}
+    }
+  </style>
+</head>
+<body>
+ 
+<!-- SETUP -->
+<div id="setup-screen">
+  <div class="setup-card">
+    <div class="setup-logo">
+      <div style="font-size:44px">🏗️</div>
+      <h1>Control de Inventario de Bodega</h1>
+      <p>Configuración inicial de Firebase (solo se hace una vez)</p>
+    </div>
+    <div class="setup-step">
+      <h3>📋 Paso 1 — Crear proyecto en Firebase</h3>
+      <p>Ve a <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a>, inicia sesión con Google, crea un proyecto y sigue los pasos. Plan <b>Spark (Gratuito)</b>.</p>
+    </div>
+    <div class="setup-step">
+      <h3>🔐 Paso 2 — Activar autenticación</h3>
+      <p>Authentication → Sign-in method → activa <b>Correo electrónico/Contraseña</b> → Guardar.</p>
+    </div>
+    <div class="setup-step">
+      <h3>🗄️ Paso 3 — Crear base de datos Firestore</h3>
+      <p>Firestore Database → Crear base de datos → <b>Modo de prueba</b> → Habilitar.</p>
+    </div>
+    <div class="setup-step">
+      <h3>⚙️ Paso 4 — Obtener claves</h3>
+      <p>⚙️ Configuración del proyecto → Tus apps → icono <b>&lt;/&gt;</b> → Registrar app → copia los valores de <b>firebaseConfig</b>.</p>
+    </div>
+    <div class="setup-fields">
+      <div class="full"><label>🔑 apiKey <span class="required">*</span></label><input id="cfg-apiKey" placeholder="AIzaSy..." autocomplete="off"></div>
+      <div><label>authDomain <span class="required">*</span></label><input id="cfg-authDomain" placeholder="proyecto.firebaseapp.com"></div>
+      <div><label>projectId <span class="required">*</span></label><input id="cfg-projectId" placeholder="mi-bodega"></div>
+      <div><label>storageBucket</label><input id="cfg-storageBucket" placeholder="proyecto.appspot.com"></div>
+      <div><label>messagingSenderId</label><input id="cfg-messagingSenderId" placeholder="123456789"></div>
+      <div class="full"><label>appId <span class="required">*</span></label><input id="cfg-appId" placeholder="1:123:web:abc..."></div>
+      <div class="full"><label>📧 Tu correo de administrador <span class="required">*</span></label><input id="cfg-adminEmail" type="email" placeholder="tuemail@gmail.com"></div>
+      <div class="full"><label>🔒 Tu contraseña (mínimo 6 caracteres) <span class="required">*</span></label><input id="cfg-adminPass" type="password" placeholder="Mínimo 6 caracteres"></div>
+    </div>
+    <button class="btn-setup" onclick="saveSetup()">✅ Guardar configuración e iniciar aplicación</button>
+    <div class="setup-error" id="setup-error"></div>
+  </div>
+</div>
+ 
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="icon">🏗️</div>
+      <h1>Control de Bodega</h1>
+      <p>Sistema de Inventario de Materiales</p>
+    </div>
+    <div class="form-group">
+      <label>Correo electrónico</label>
+      <input type="email" id="login-email" placeholder="usuario@empresa.com" autocomplete="email">
+    </div>
+    <div class="form-group">
+      <label>Contraseña</label>
+      <input type="password" id="login-pass" placeholder="Tu contraseña" autocomplete="current-password">
+    </div>
+    <button class="btn-login" id="btn-login" onclick="doLogin()">Ingresar al sistema</button>
+    <div class="login-error" id="login-error"></div>
+    <div class="forgot-link"><a onclick="doForgot()">¿Olvidaste tu contraseña?</a></div>
+    <div style="text-align:center;margin-top:12px;font-size:11px;color:#94a3b8">
+      <a onclick="showSetup()" style="color:#94a3b8;cursor:pointer;text-decoration:underline">⚙️ Reconfigurar Firebase</a>
+    </div>
+  </div>
+</div>
+ 
+<!-- MAIN APP -->
+<div id="main-app">
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">🏗️ Control de</div>
+      <h2>Inventario Bodega</h2>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">Principal</div>
+      <a class="nav-item active" data-page="dashboard" onclick="goPage('dashboard')"><span class="icon">📊</span> Panel Principal</a>
+      <a class="nav-item" data-page="inventario" onclick="goPage('inventario')"><span class="icon">📦</span> Inventario</a>
+      <a class="nav-item" data-page="salidas" onclick="goPage('salidas')"><span class="icon">📤</span> Movimientos / Salidas</a>
+      <a class="nav-item" data-page="importar" onclick="goPage('importar')"><span class="icon">📥</span> Importar Excel</a>
+      <div class="nav-section">Gestión</div>
+      <a class="nav-item admin-only" data-page="usuarios" onclick="goPage('usuarios')"><span class="icon">👥</span> Usuarios</a>
+      <a class="nav-item" data-page="exportar" onclick="goPage('exportar')"><span class="icon">📊</span> Exportar / Reportes</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="user-avatar" id="user-avatar">?</div>
+        <div>
+          <div class="user-name" id="user-name-sidebar">Cargando...</div>
+          <div class="user-email" id="user-email-sidebar">-</div>
+        </div>
+      </div>
+      <button class="btn-logout" onclick="doLogout()">🚪 Cerrar sesión</button>
+    </div>
+  </aside>
+ 
+  <div id="content">
+    <div id="topbar">
+      <h2 id="page-title">Panel Principal</h2>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn btn-primary" id="btn-add-inv" onclick="openAddModal()" style="display:none">➕ Agregar Material</button>
+        <button class="btn btn-warning" id="btn-add-salida-top" onclick="openSalidaModal(null)" style="display:none">📤 Registrar Salida</button>
+        <span id="user-role-badge" class="badge badge-blue" style="font-size:11px"></span>
+      </div>
+    </div>
+    <div id="page-content">
+ 
+      <!-- DASHBOARD -->
+      <div id="page-dashboard" class="page active">
+        <div style="margin-bottom:18px">
+          <h2 id="dashboard-greeting" style="font-size:20px;font-weight:700">Bienvenido 👋</h2>
+          <p id="dashboard-date" style="font-size:13px;color:var(--text-light);margin-top:2px"></p>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card blue"><div class="stat-label">Materiales</div><div class="stat-value" id="stat-total">-</div><div class="stat-sub">tipos en inventario</div></div>
+          <div class="stat-card green"><div class="stat-label">Disponible Total</div><div class="stat-value" id="stat-disponible">-</div><div class="stat-sub">unidades disponibles</div></div>
+          <div class="stat-card orange"><div class="stat-label">Salidas Totales</div><div class="stat-value" id="stat-salidas">-</div><div class="stat-sub">unidades entregadas</div></div>
+          <div class="stat-card red"><div class="stat-label">Sin Stock</div><div class="stat-value" id="stat-agotados">-</div><div class="stat-sub">materiales agotados</div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>📋 Inventario reciente</h3><button class="btn btn-outline btn-sm" onclick="goPage('inventario')">Ver todo →</button></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Material</th><th>Existencia</th><th>Salidas</th><th>Disponible</th><th>F. Ingreso</th></tr></thead>
+              <tbody id="recent-tbody"><tr><td colspan="5" class="loading"><div class="spinner"></div></td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>📤 Últimas salidas</h3><button class="btn btn-outline btn-sm" onclick="goPage('salidas')">Ver todo →</button></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Material</th><th>Cantidad</th><th>Fecha</th><th>Responsable</th></tr></thead>
+              <tbody id="recent-salidas-tbody"><tr><td colspan="4" class="loading"><div class="spinner"></div></td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+ 
+      <!-- INVENTARIO -->
+      <div id="page-inventario" class="page">
+        <div class="card">
+          <div class="card-header">
+            <h3>📦 Inventario de Materiales</h3>
+            <div class="filters-bar">
+              <div class="search-wrap"><span class="si">🔍</span><input type="text" id="inv-search" placeholder="Buscar..." oninput="filterInv()"></div>
+              <select class="filter-select" id="inv-filter" onchange="filterInv()">
+                <option value="todos">Todos</option>
+                <option value="disponible">Con stock</option>
+                <option value="agotado">Sin stock</option>
+              </select>
+              <button class="btn btn-primary" onclick="openAddModal()">➕ Agregar</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Material</th><th>Existencia</th><th>Total Salidas</th><th>Disponible</th><th>F. Ingreso</th><th>Notas</th><th>Acciones</th></tr></thead>
+              <tbody id="inv-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="inv-pagination"></div>
+        </div>
+      </div>
+ 
+      <!-- SALIDAS / MOVIMIENTOS -->
+      <div id="page-salidas" class="page">
+        <div class="card">
+          <div class="card-header">
+            <h3>📤 Registro de Salidas</h3>
+            <div class="filters-bar">
+              <div class="search-wrap"><span class="si">🔍</span><input type="text" id="sal-search" placeholder="Buscar..." oninput="filterSalidas()"></div>
+              <button class="btn btn-warning" onclick="openSalidaModal(null)">📤 Registrar Salida</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Material</th><th>Cantidad Salida</th><th>Fecha Salida</th><th>Responsable</th><th>Notas</th><th>Acciones</th></tr></thead>
+              <tbody id="sal-tbody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="sal-pagination"></div>
+        </div>
+      </div>
+ 
+      <!-- IMPORTAR -->
+      <div id="page-importar" class="page">
+        <div style="margin-bottom:18px"><h2 style="font-size:20px;font-weight:700">📥 Importar desde Excel</h2><p style="font-size:13px;color:var(--text-light);margin-top:3px">Carga tu archivo Excel existente de una sola vez</p></div>
+        <div class="card">
+          <div class="card-header"><h3>Formato requerido del Excel</h3></div>
+          <div class="card-body">
+            <p style="font-size:13px;color:#475569;margin-bottom:12px">Tu Excel debe tener estas columnas (la fila 1 es el encabezado):</p>
+            <div class="table-wrap" style="margin-bottom:12px">
+              <table style="font-size:12px">
+                <thead><tr><th>Material</th><th>Existencia</th><th>Fecha de Ingreso</th><th>Notas</th></tr></thead>
+                <tbody>
+                  <tr><td>Cemento Portland</td><td>50</td><td>2024-03-15</td><td>Saco 50kg</td></tr>
+                  <tr><td>Varilla 3/8"</td><td>200</td><td>2024-03-18</td><td></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p style="font-size:11px;color:#94a3b8">* Las salidas se registran después, una por una desde el menú "Salidas".</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Seleccionar archivo</h3></div>
+          <div class="card-body">
+            <div class="import-zone" onclick="document.getElementById('file-input').click()">
+              <input type="file" id="file-input" style="display:none" accept=".xlsx,.xls,.csv" onchange="handleImport(event)">
+              <div style="font-size:38px">📂</div>
+              <h4>Haz clic para seleccionar tu archivo Excel</h4>
+              <p>Formatos: .xlsx, .xls, .csv</p>
+            </div>
+            <div id="import-preview-wrap" style="display:none;margin-top:18px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <h4 id="import-count-label" style="font-size:14px;font-weight:700"></h4>
+                <div style="display:flex;gap:7px">
+                  <button class="btn btn-outline btn-sm" onclick="clearImport()">✕ Cancelar</button>
+                  <button class="btn btn-success" onclick="confirmImport()">✅ Importar todos</button>
+                </div>
+              </div>
+              <div class="table-wrap" id="import-preview"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+ 
+      <!-- USUARIOS -->
+      <div id="page-usuarios" class="page">
+        <div style="margin-bottom:18px"><h2 style="font-size:20px;font-weight:700">👥 Usuarios</h2><p style="font-size:13px;color:var(--text-light);margin-top:3px">Agrega y administra los usuarios del sistema</p></div>
+        <div class="card">
+          <div class="card-header"><h3>Usuarios del sistema</h3><button class="btn btn-primary" onclick="openAddUser()">➕ Agregar usuario</button></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Registrado</th><th>Acciones</th></tr></thead>
+              <tbody id="users-tbody"><tr><td colspan="5" class="loading"><div class="spinner"></div></td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+ 
+      <!-- EXPORTAR -->
+      <div id="page-exportar" class="page">
+        <div style="margin-bottom:18px"><h2 style="font-size:20px;font-weight:700">📊 Exportar / Reportes</h2><p style="font-size:13px;color:var(--text-light);margin-top:3px">Descarga reportes en Excel</p></div>
+        <div class="stats-grid">
+          <div class="card" style="margin-bottom:0;padding:18px">
+            <div style="font-size:34px;margin-bottom:7px">📦</div>
+            <h3 style="font-size:15px;margin-bottom:5px">Inventario completo</h3>
+            <p style="font-size:12px;color:#64748b;margin-bottom:12px">Todos los materiales con existencia y disponible</p>
+            <button class="btn btn-primary" onclick="exportExcel('inventario')">⬇️ Descargar Excel</button>
+          </div>
+          <div class="card" style="margin-bottom:0;padding:18px">
+            <div style="font-size:34px;margin-bottom:7px">📤</div>
+            <h3 style="font-size:15px;margin-bottom:5px">Registro de salidas</h3>
+            <p style="font-size:12px;color:#64748b;margin-bottom:12px">Todas las salidas con responsable y fecha</p>
+            <button class="btn btn-warning" onclick="exportExcel('salidas')">⬇️ Descargar Excel</button>
+          </div>
+          <div class="card" style="margin-bottom:0;padding:18px">
+            <div style="font-size:34px;margin-bottom:7px">✅</div>
+            <h3 style="font-size:15px;margin-bottom:5px">Solo con stock disponible</h3>
+            <p style="font-size:12px;color:#64748b;margin-bottom:12px">Materiales que aún tienen existencias</p>
+            <button class="btn btn-success" onclick="exportExcel('disponible')">⬇️ Descargar Excel</button>
+          </div>
+        </div>
+        <div class="card" style="margin-top:18px">
+          <div class="card-header"><h3>Exportar salidas por rango de fechas</h3></div>
+          <div class="card-body">
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
+              <div class="form-field"><label>Desde</label><input type="date" id="exp-desde"></div>
+              <div class="form-field"><label>Hasta</label><input type="date" id="exp-hasta"></div>
+              <button class="btn btn-primary" onclick="exportExcel('rango')">⬇️ Exportar rango</button>
+            </div>
+          </div>
+        </div>
+      </div>
+ 
+    </div>
+  </div>
+</div>
+ 
+<!-- MODAL MATERIAL -->
+<div id="modal-mat" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-mat-title">Agregar Material</h3>
+      <button class="modal-close" onclick="closeModal('modal-mat')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-grid">
+        <div class="form-field full autocomplete-wrap">
+          <label>Material <span class="required">*</span></label>
+          <input type="text" id="m-material" placeholder="Ej: Cemento Portland, Varilla 3/8..." oninput="showAC()">
+          <div class="autocomplete-list" id="ac-list" style="display:none"></div>
+        </div>
+        <div class="form-field">
+          <label>Existencia <span class="required">*</span></label>
+          <input type="number" id="m-existencia" placeholder="Ej: 100" min="0" step="any">
+        </div>
+        <div class="form-field">
+          <label>Unidad de medida</label>
+          <select id="m-unidad">
+            <option value="">Sin especificar</option>
+            <option value="unidades">Unidades</option>
+            <option value="sacos">Sacos</option>
+            <option value="metros">Metros</option>
+            <option value="m²">m²</option>
+            <option value="m³">m³</option>
+            <option value="kg">Kg</option>
+            <option value="toneladas">Toneladas</option>
+            <option value="litros">Litros</option>
+            <option value="galones">Galones</option>
+            <option value="varillas">Varillas</option>
+            <option value="rollos">Rollos</option>
+            <option value="bolsas">Bolsas</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Fecha de Ingreso <span class="required">*</span></label>
+          <input type="date" id="m-fecha-ingreso">
+        </div>
+        <div class="form-field full">
+          <label>Notas</label>
+          <textarea id="m-notas" placeholder="Observaciones adicionales..."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-mat')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveMaterial()" id="btn-save-mat">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+ 
+<!-- MODAL SALIDA -->
+<div id="modal-salida" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-sal-title">📤 Registrar Salida</h3>
+      <button class="modal-close" onclick="closeModal('modal-salida')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-grid">
+        <div class="form-field full autocomplete-wrap">
+          <label>Material <span class="required">*</span></label>
+          <input type="text" id="s-material" placeholder="Escribe el nombre del material..." oninput="showACSalida()">
+          <div class="autocomplete-list" id="ac-sal-list" style="display:none"></div>
+        </div>
+        <div id="s-disponible-info" style="display:none;grid-column:1/-1;background:#f0fdf4;border-radius:8px;padding:10px 12px;font-size:13px;border-left:3px solid var(--success)">
+          <span id="s-disp-text"></span>
+        </div>
+        <div class="form-field">
+          <label>Cantidad que sale <span class="required">*</span></label>
+          <input type="number" id="s-cantidad" placeholder="Ej: 10" min="1" step="any">
+        </div>
+        <div class="form-field">
+          <label>Fecha de Salida <span class="required">*</span></label>
+          <input type="date" id="s-fecha">
+        </div>
+        <div class="form-field full">
+          <label>Responsable / Persona que recibe <span class="required">*</span></label>
+          <input type="text" id="s-responsable" placeholder="Nombre de quien recibe el material">
+        </div>
+        <div class="form-field full">
+          <label>Notas</label>
+          <textarea id="s-notas" placeholder="Observaciones..."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-salida')">Cancelar</button>
+      <button class="btn btn-warning" onclick="saveSalida()" id="btn-save-sal">💾 Registrar Salida</button>
+    </div>
+  </div>
+</div>
+ 
+<!-- MODAL VER SALIDAS DE UN MATERIAL -->
+<div id="modal-ver-salidas" class="modal-overlay">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-header">
+      <h3 id="modal-ver-sal-title">Salidas del material</h3>
+      <button class="modal-close" onclick="closeModal('modal-ver-salidas')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="ver-salidas-summary" style="background:#f8fafc;border-radius:10px;padding:14px;margin-bottom:14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center"></div>
+      <div id="ver-salidas-list"></div>
+    </div>
+  </div>
+</div>
+ 
+<!-- MODAL USUARIO -->
+<div id="modal-user" class="modal-overlay">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <h3 id="modal-user-title">Agregar Usuario</h3>
+      <button class="modal-close" onclick="closeModal('modal-user')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-field" style="margin-bottom:12px"><label>Nombre completo <span class="required">*</span></label><input type="text" id="u-nombre" placeholder="Nombre"></div>
+      <div class="form-field" style="margin-bottom:12px"><label>Correo <span class="required">*</span></label><input type="email" id="u-email" placeholder="correo@empresa.com"></div>
+      <div class="form-field" style="margin-bottom:12px" id="u-pass-field"><label>Contraseña <span class="required">*</span></label><input type="password" id="u-pass" placeholder="Mínimo 6 caracteres"><span class="hint" style="font-size:11px;color:#64748b;margin-top:2px;display:block">El usuario puede cambiarla después</span></div>
+      <div class="form-field"><label>Rol</label><select id="u-rol"><option value="usuario">Usuario (ver y agregar)</option><option value="admin">Administrador (acceso total)</option></select></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-user')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveUser()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+ 
+<!-- CONFIRM -->
+<div id="confirm-overlay">
+  <div class="confirm-card">
+    <div class="confirm-icon">⚠️</div>
+    <h3 id="confirm-title">¿Estás seguro?</h3>
+    <p id="confirm-msg">Esta acción no se puede deshacer.</p>
+    <div class="confirm-actions">
+      <button class="btn btn-outline" onclick="closeConfirm()">Cancelar</button>
+      <button class="btn btn-danger" id="confirm-ok">Eliminar</button>
+    </div>
+  </div>
+</div>
+ 
+<div id="toast-container"></div>
+ 
+<script>
+// ============================================================
+// ESTADO Y DATOS
+// ============================================================
+let db, auth, currentUser = null, currentUserProfile = null;
+let allMaterials = [], allSalidas = [], salidasMap = {};
+let editingMatId = null, editingUserId = null, editingSalidaId = null, currentSalidaMat = null;
+let invPage = 1, salPage = 1; const PER = 20;
+let confirmCallback = null;
+ 
+function getSavedConfig(){ try{ return JSON.parse(localStorage.getItem('fbConfig')||'null'); }catch(e){ return null; } }
+function saveConfig(cfg){ localStorage.setItem('fbConfig', JSON.stringify(cfg)); }
+ 
+function initApp(){
+  const cfg = getSavedConfig();
+  hide('setup-screen'); hide('login-screen'); hide('main-app');
+  if(!cfg || !cfg.apiKey || cfg.apiKey.includes('PEGAR')){ show('setup-screen'); return; }
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(cfg);
+    db = firebase.firestore(); auth = firebase.auth();
+    auth.onAuthStateChanged(user => { if(user){ currentUser=user; loadUserProfile(); } else{ hide('main-app'); show('login-screen'); } });
+  }catch(e){ localStorage.removeItem('fbConfig'); show('setup-screen'); showError('setup-error','❌ Error al conectar. Verifica las claves.'); }
+}
+ 
+async function saveSetup(){
+  const cfg = { apiKey:val('cfg-apiKey'), authDomain:val('cfg-authDomain'), projectId:val('cfg-projectId'), storageBucket:val('cfg-storageBucket'), messagingSenderId:val('cfg-messagingSenderId'), appId:val('cfg-appId') };
+  const adminEmail=val('cfg-adminEmail'), adminPass=val('cfg-adminPass');
+  if(!cfg.apiKey||!cfg.projectId||!cfg.appId) return showError('setup-error','⚠️ Llena los campos obligatorios: apiKey, projectId, appId.');
+  if(!adminEmail) return showError('setup-error','⚠️ Ingresa tu correo de administrador.');
+  if(!adminPass||adminPass.length<6) return showError('setup-error','⚠️ La contraseña debe tener al menos 6 caracteres.');
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(cfg);
+    db=firebase.firestore(); auth=firebase.auth();
+    try{
+      const cred=await auth.createUserWithEmailAndPassword(adminEmail,adminPass);
+      await db.collection('usuarios').doc(cred.user.uid).set({ nombre:'Administrador', email:adminEmail, rol:'admin', creadoEn:firebase.firestore.FieldValue.serverTimestamp() });
+      toast('✅ Cuenta creada','success');
+    }catch(e){
+      if(e.code==='auth/email-already-in-use'){ await auth.signInWithEmailAndPassword(adminEmail,adminPass); toast('✅ Sesión iniciada','success'); }
+      else throw e;
+    }
+    saveConfig(cfg); hide('setup-screen');
+    auth.onAuthStateChanged(user=>{ if(user){ currentUser=user; loadUserProfile(); } });
+  }catch(e){
+    const m={'auth/invalid-api-key':'❌ apiKey inválido.','auth/invalid-email':'❌ Correo inválido.','auth/weak-password':'❌ Contraseña muy débil.','auth/network-request-failed':'❌ Sin internet.'};
+    showError('setup-error', m[e.code]||'❌ Error: '+e.message);
+  }
+}
+function showSetup(){ hide('main-app'); hide('login-screen'); show('setup-screen'); }
+ 
+// AUTH
+async function doLogin(){
+  const email=val('login-email'), pass=val('login-pass');
+  if(!email||!pass) return showError('login-error','Por favor llena todos los campos.');
+  const btn=document.getElementById('btn-login'); btn.disabled=true; btn.textContent='Ingresando...';
+  try{ await auth.signInWithEmailAndPassword(email,pass); hideError('login-error'); }
+  catch(e){
+    const m={'auth/user-not-found':'❌ Correo no registrado.','auth/wrong-password':'❌ Contraseña incorrecta.','auth/invalid-credential':'❌ Correo o contraseña incorrectos.','auth/too-many-requests':'⚠️ Demasiados intentos. Espera unos minutos.'};
+    showError('login-error', m[e.code]||'❌ Error: '+e.message);
+  } finally{ btn.disabled=false; btn.textContent='Ingresar al sistema'; }
+}
+async function doForgot(){
+  const email=val('login-email');
+  if(!email) return showError('login-error','Escribe tu correo arriba primero.');
+  try{ await auth.sendPasswordResetEmail(email); showError('login-error','✅ Correo de recuperación enviado.'); document.getElementById('login-error').style.background='#dcfce7'; document.getElementById('login-error').style.color='#15803d'; }
+  catch(e){ showError('login-error','❌ No pudimos enviar el correo.'); }
+}
+async function doLogout(){ await auth.signOut(); currentUser=null; currentUserProfile=null; hide('main-app'); show('login-screen'); }
+ 
+async function loadUserProfile(){
+  try{
+    const doc=await db.collection('usuarios').doc(currentUser.uid).get();
+    if(doc.exists){ currentUserProfile=doc.data(); }
+    else{ currentUserProfile={nombre:currentUser.email,email:currentUser.email,rol:'usuario'}; await db.collection('usuarios').doc(currentUser.uid).set({...currentUserProfile,creadoEn:firebase.firestore.FieldValue.serverTimestamp()}); }
+    setupUI(); await loadAllData(); hide('login-screen'); hide('setup-screen'); show('main-app'); goPage('dashboard');
+  }catch(e){ toast('Error al cargar perfil: '+e.message,'error'); }
+}
+function setupUI(){
+  const n=currentUserProfile.nombre||currentUserProfile.email;
+  setText('user-name-sidebar',n); setText('user-email-sidebar',currentUserProfile.email); setText('user-avatar',n[0].toUpperCase());
+  const isAdmin=currentUserProfile.rol==='admin';
+  setText('user-role-badge',isAdmin?'👑 Admin':'👤 Usuario');
+  document.getElementById('user-role-badge').className='badge '+(isAdmin?'badge-orange':'badge-blue');
+  document.querySelectorAll('.admin-only').forEach(el=>el.style.display=isAdmin?'flex':'none');
+}
+ 
+// NAVIGATION
+const PAGE_TITLES={ dashboard:'Panel Principal', inventario:'Inventario de Materiales', salidas:'Movimientos / Salidas', importar:'Importar desde Excel', usuarios:'Usuarios', exportar:'Exportar / Reportes' };
+function goPage(page){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+page)?.classList.add('active');
+  document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
+  setText('page-title', PAGE_TITLES[page]||page);
+  document.getElementById('btn-add-inv').style.display = page==='inventario'?'inline-flex':'none';
+  document.getElementById('btn-add-salida-top').style.display = page==='salidas'?'inline-flex':'none';
+  if(page==='usuarios') loadUsers();
+  if(page==='inventario') renderInv(getFilteredInv());
+  if(page==='salidas') renderSalidas(getFilteredSalidas());
+}
+ 
+// LOAD DATA
+async function loadAllData(){
+  try{
+    const [matSnap, salSnap] = await Promise.all([
+      db.collection('inventario').orderBy('creadoEn','desc').get(),
+      db.collection('salidas').orderBy('fecha','desc').get()
+    ]);
+    allMaterials = matSnap.docs.map(d=>({id:d.id,...d.data()}));
+    allSalidas = salSnap.docs.map(d=>({id:d.id,...d.data()}));
+    buildSalidasMap();
+    renderDashboard();
+    renderInv(getFilteredInv());
+    renderSalidas(getFilteredSalidas());
+  }catch(e){ toast('Error al cargar datos: '+e.message,'error'); }
+}
+ 
+function buildSalidasMap(){
+  salidasMap = {};
+  allSalidas.forEach(s=>{
+    if(!salidasMap[s.materialId]) salidasMap[s.materialId]=0;
+    salidasMap[s.materialId] += Number(s.cantidad)||0;
+  });
+}
+ 
+function getDisponible(mat){
+  const salidas = salidasMap[mat.id]||0;
+  return (Number(mat.existencia)||0) - salidas;
+}
+ 
+// DASHBOARD
+function renderDashboard(){
+  const now=new Date();
+  const days=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  const months=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  setText('dashboard-greeting',`Hola, ${currentUserProfile.nombre||'usuario'} 👋`);
+  setText('dashboard-date',`${days[now.getDay()]}, ${now.getDate()} de ${months[now.getMonth()]} de ${now.getFullYear()}`);
+  const totalMats = allMaterials.length;
+  const totalDisp = allMaterials.reduce((s,m)=>s+Math.max(0,getDisponible(m)),0);
+  const totalSal = Object.values(salidasMap).reduce((s,v)=>s+v,0);
+  const agotados = allMaterials.filter(m=>getDisponible(m)<=0).length;
+  setText('stat-total',totalMats); setText('stat-disponible',totalDisp.toLocaleString());
+  setText('stat-salidas',totalSal.toLocaleString()); setText('stat-agotados',agotados);
+  // Recent materials
+  const tbody=document.getElementById('recent-tbody');
+  if(!allMaterials.length){ tbody.innerHTML='<tr><td colspan="5" class="empty-table">📭 No hay materiales aún</td></tr>'; }
+  else{ tbody.innerHTML=allMaterials.slice(0,7).map(m=>{ const disp=getDisponible(m); return `<tr><td><b>${esc(m.material)}</b>${m.unidad?'<small style="color:#94a3b8"> '+esc(m.unidad)+'</small>':''}</td><td>${m.existencia}</td><td>${salidasMap[m.id]||0}</td><td><span class="disponible-num ${disp>0?'ok':disp===0?'empty':'empty'}">${disp}</span></td><td>${fmtDate(m.fechaIngreso)}</td></tr>`; }).join(''); }
+  // Recent salidas
+  const stbody=document.getElementById('recent-salidas-tbody');
+  if(!allSalidas.length){ stbody.innerHTML='<tr><td colspan="4" class="empty-table">📭 No hay salidas registradas</td></tr>'; }
+  else{ stbody.innerHTML=allSalidas.slice(0,7).map(s=>`<tr><td><b>${esc(s.material)}</b></td><td><span style="color:var(--danger);font-weight:700">-${s.cantidad}${s.unidad?' '+esc(s.unidad):''}</span></td><td>${fmtDate(s.fecha)}</td><td>${esc(s.responsable||'—')}</td></tr>`).join(''); }
+}
+ 
+// INVENTARIO
+function getFilteredInv(){
+  const q=val('inv-search').toLowerCase(), f=val('inv-filter')||'todos';
+  return allMaterials.filter(m=>{
+    const match=!q||(m.material||'').toLowerCase().includes(q)||(m.notas||'').toLowerCase().includes(q);
+    const disp=getDisponible(m);
+    const status=f==='disponible'?disp>0:f==='agotado'?disp<=0:true;
+    return match&&status;
+  });
+}
+function filterInv(){ invPage=1; renderInv(getFilteredInv()); }
+function renderInv(recs){
+  const tbody=document.getElementById('inv-tbody');
+  const total=recs.length, pages=Math.ceil(total/PER)||1;
+  invPage=Math.min(invPage,pages);
+  const slice=recs.slice((invPage-1)*PER, invPage*PER);
+  const q=val('inv-search');
+  if(!slice.length){ tbody.innerHTML='<tr><td colspan="7" class="empty-table">📭 No hay materiales</td></tr>'; renderPag('inv-pagination',0,1); return; }
+  tbody.innerHTML=slice.map(m=>{
+    const disp=getDisponible(m), cls=disp>0?'ok':disp===0?'empty':'empty';
+    const sal=salidasMap[m.id]||0;
+    return `<tr>
+      <td><b>${highlight(esc(m.material),q)}</b>${m.unidad?'<br><small style="color:#94a3b8">'+esc(m.unidad)+'</small>':''}</td>
+      <td style="font-weight:600">${m.existencia}</td>
+      <td style="color:var(--danger);font-weight:600">${sal>0?'-'+sal:sal}</td>
+      <td><span class="disponible-num ${cls}" style="font-size:15px">${disp}</span></td>
+      <td>${fmtDate(m.fechaIngreso)}</td>
+      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(m.notas||'')}">${esc(m.notas||'—')}</td>
+      <td>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn btn-warning btn-sm" onclick="openSalidaModal('${m.id}')">📤 Salida</button>
+          <button class="btn btn-outline btn-sm" onclick="verSalidas('${m.id}')">📋 Ver salidas</button>
+          <button class="btn btn-outline btn-sm" onclick="editMat('${m.id}')">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteMat('${m.id}','${esc(m.material)}')">🗑️</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  renderPag('inv-pagination',total,pages);
+}
+ 
+// SALIDAS
+function getFilteredSalidas(){
+  const q=val('sal-search').toLowerCase();
+  return allSalidas.filter(s=>!q||(s.material||'').toLowerCase().includes(q)||(s.responsable||'').toLowerCase().includes(q));
+}
+function filterSalidas(){ salPage=1; renderSalidas(getFilteredSalidas()); }
+function renderSalidas(recs){
+  const tbody=document.getElementById('sal-tbody');
+  const total=recs.length, pages=Math.ceil(total/PER)||1;
+  salPage=Math.min(salPage,pages);
+  const slice=recs.slice((salPage-1)*PER, salPage*PER);
+  const q=val('sal-search');
+  if(!slice.length){ tbody.innerHTML='<tr><td colspan="6" class="empty-table">📭 No hay salidas registradas</td></tr>'; renderPag('sal-pagination',0,1); return; }
+  tbody.innerHTML=slice.map(s=>`<tr>
+    <td><b>${highlight(esc(s.material),q)}</b>${s.unidad?'<br><small style="color:#94a3b8">'+esc(s.unidad)+'</small>':''}</td>
+    <td><span style="color:var(--danger);font-weight:700;font-size:15px">-${s.cantidad}</span></td>
+    <td>${fmtDate(s.fecha)}</td>
+    <td>${highlight(esc(s.responsable||'—'),q)}</td>
+    <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.notas||'')}">${esc(s.notas||'—')}</td>
+    <td>
+      <div style="display:flex;gap:4px">
+        <button class="btn btn-outline btn-sm" onclick="editSalida('${s.id}')">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSalida('${s.id}','${esc(s.material)}','${s.cantidad}')">🗑️</button>
+      </div>
+    </td>
+  </tr>`).join('');
+  renderPag('sal-pagination',total,pages);
+}
+ 
+// PAGINATION
+function renderPag(id,total,pages){
+  const pg=document.getElementById(id);
+  if(pages<=1){ pg.innerHTML=total>0?`<span class="page-info">${total} registro(s)</span>`:''; return; }
+  const cur=id.startsWith('inv')?invPage:salPage;
+  let html=`<span class="page-info">${total} registros | Pág ${cur}/${pages}</span>`;
+  html+=`<button class="page-btn" onclick="changePag('${id}',${cur-1})" ${cur===1?'disabled':''}>‹</button>`;
+  for(let i=1;i<=pages;i++){ if(i<=2||i>=pages-1||Math.abs(i-cur)<=1) html+=`<button class="page-btn ${i===cur?'active':''}" onclick="changePag('${id}',${i})">${i}</button>`; else if(i===3||i===pages-2) html+='<span>…</span>'; }
+  html+=`<button class="page-btn" onclick="changePag('${id}',${cur+1})" ${cur===pages?'disabled':''}>›</button>`;
+  pg.innerHTML=html;
+}
+function changePag(id,p){ if(id.startsWith('inv')){ invPage=p; renderInv(getFilteredInv()); } else{ salPage=p; renderSalidas(getFilteredSalidas()); } }
+ 
+// AGREGAR/EDITAR MATERIAL
+function openAddModal(){
+  editingMatId=null; setText('modal-mat-title','➕ Agregar Material');
+  setVal('m-material',''); setVal('m-existencia',''); setVal('m-unidad','');
+  setVal('m-fecha-ingreso',new Date().toISOString().split('T')[0]); setVal('m-notas','');
+  open('modal-mat');
+}
+function editMat(id){
+  const m=allMaterials.find(x=>x.id===id); if(!m) return;
+  editingMatId=id; setText('modal-mat-title','✏️ Editar Material');
+  setVal('m-material',m.material||''); setVal('m-existencia',m.existencia||'');
+  setVal('m-unidad',m.unidad||''); setVal('m-fecha-ingreso',toInputDate(m.fechaIngreso)); setVal('m-notas',m.notas||'');
+  open('modal-mat');
+}
+async function saveMaterial(){
+  const material=val('m-material').trim(), existencia=parseFloat(val('m-existencia'));
+  const fechaIngreso=val('m-fecha-ingreso');
+  if(!material) return toast('⚠️ El nombre del material es obligatorio','error');
+  if(isNaN(existencia)||existencia<0) return toast('⚠️ La existencia debe ser un número mayor o igual a 0','error');
+  if(!fechaIngreso) return toast('⚠️ La fecha de ingreso es obligatoria','error');
+  const data={ material, existencia, unidad:val('m-unidad'), fechaIngreso:new Date(fechaIngreso+'T00:00:00'), notas:val('m-notas').trim(), actualizadoPor:currentUser.email, actualizadoEn:firebase.firestore.FieldValue.serverTimestamp() };
+  const btn=document.getElementById('btn-save-mat'); btn.disabled=true; btn.textContent='Guardando...';
+  try{
+    if(editingMatId){ await db.collection('inventario').doc(editingMatId).update(data); toast('✅ Material actualizado','success'); }
+    else{ data.creadoPor=currentUser.email; data.creadoEn=firebase.firestore.FieldValue.serverTimestamp(); await db.collection('inventario').add(data); toast('✅ Material agregado','success'); }
+    closeModal('modal-mat'); await loadAllData();
+  }catch(e){ toast('❌ Error: '+e.message,'error'); }
+  finally{ btn.disabled=false; btn.textContent='💾 Guardar'; }
+}
+function deleteMat(id,name){
+  confirmAction(`¿Eliminar "${name}"?`,'Se eliminará el material y todas sus salidas. Esta acción no se puede deshacer.',async()=>{
+    const salDocs=await db.collection('salidas').where('materialId','==',id).get();
+    const batch=db.batch();
+    salDocs.docs.forEach(d=>batch.delete(d.ref));
+    batch.delete(db.collection('inventario').doc(id));
+    await batch.commit();
+    toast('🗑️ Material eliminado','info'); await loadAllData();
+  });
+}
+ 
+// SALIDAS MODAL
+function openSalidaModal(matId){
+  editingSalidaId=null; currentSalidaMat=null;
+  setText('modal-sal-title','📤 Registrar Salida');
+  setVal('s-material',''); setVal('s-cantidad',''); setVal('s-responsable',''); setVal('s-notas','');
+  setVal('s-fecha',new Date().toISOString().split('T')[0]);
+  document.getElementById('s-disponible-info').style.display='none';
+  if(matId){
+    const m=allMaterials.find(x=>x.id===matId);
+    if(m){ setVal('s-material',m.material); currentSalidaMat=m; showDispInfo(m); }
+  }
+  open('modal-salida');
+}
+function editSalida(id){
+  const s=allSalidas.find(x=>x.id===id); if(!s) return;
+  editingSalidaId=id; currentSalidaMat=allMaterials.find(m=>m.id===s.materialId)||null;
+  setText('modal-sal-title','✏️ Editar Salida');
+  setVal('s-material',s.material||''); setVal('s-cantidad',s.cantidad||'');
+  setVal('s-fecha',toInputDate(s.fecha)); setVal('s-responsable',s.responsable||''); setVal('s-notas',s.notas||'');
+  if(currentSalidaMat) showDispInfo(currentSalidaMat);
+  open('modal-salida');
+}
+function showDispInfo(m){
+  const disp=getDisponible(m);
+  const info=document.getElementById('s-disponible-info');
+  info.style.display='block';
+  document.getElementById('s-disp-text').innerHTML=`<b>${esc(m.material)}</b> — Existencia: <b>${m.existencia}${m.unidad?' '+m.unidad:''}</b> | Total salidas: <b>${salidasMap[m.id]||0}</b> | <span style="color:${disp>0?'var(--success)':'var(--danger)'}"><b>Disponible: ${disp}</b></span>`;
+}
+async function saveSalida(){
+  const material=val('s-material').trim(), cantidad=parseFloat(val('s-cantidad'));
+  const fecha=val('s-fecha'), responsable=val('s-responsable').trim();
+  if(!material) return toast('⚠️ El nombre del material es obligatorio','error');
+  if(isNaN(cantidad)||cantidad<=0) return toast('⚠️ La cantidad debe ser mayor a 0','error');
+  if(!fecha) return toast('⚠️ La fecha es obligatoria','error');
+  if(!responsable) return toast('⚠️ El responsable es obligatorio','error');
+  // Find material ID
+  const mat=allMaterials.find(m=>m.material.toLowerCase()===material.toLowerCase());
+  if(!mat) return toast('⚠️ No se encontró ese material en el inventario. Verifica el nombre.','error');
+  const dispActual=getDisponible(mat)+(editingSalidaId?(allSalidas.find(s=>s.id===editingSalidaId)?.cantidad||0):0);
+  if(cantidad>dispActual) return toast(`⚠️ Solo hay ${dispActual} unidades disponibles de ese material.`,'error');
+  const data={ materialId:mat.id, material:mat.material, unidad:mat.unidad||'', cantidad, fecha:new Date(fecha+'T00:00:00'), responsable, notas:val('s-notas').trim(), actualizadoPor:currentUser.email, actualizadoEn:firebase.firestore.FieldValue.serverTimestamp() };
+  const btn=document.getElementById('btn-save-sal'); btn.disabled=true; btn.textContent='Guardando...';
+  try{
+    if(editingSalidaId){ await db.collection('salidas').doc(editingSalidaId).update(data); toast('✅ Salida actualizada','success'); }
+    else{ data.creadoPor=currentUser.email; data.creadoEn=firebase.firestore.FieldValue.serverTimestamp(); await db.collection('salidas').add(data); toast('✅ Salida registrada','success'); }
+    closeModal('modal-salida'); await loadAllData();
+  }catch(e){ toast('❌ Error: '+e.message,'error'); }
+  finally{ btn.disabled=false; btn.textContent='💾 Registrar Salida'; }
+}
+function deleteSalida(id,name,qty){
+  confirmAction(`¿Eliminar salida de "${name}"?`,`Se revertirán ${qty} unidades al disponible.`,async()=>{
+    await db.collection('salidas').doc(id).delete();
+    toast('🗑️ Salida eliminada','info'); await loadAllData();
+  });
+}
+ 
+// VER SALIDAS DE UN MATERIAL
+function verSalidas(matId){
+  const mat=allMaterials.find(m=>m.id===matId); if(!mat) return;
+  const matSalidas=allSalidas.filter(s=>s.materialId===matId);
+  const totalSal=matSalidas.reduce((s,x)=>s+Number(x.cantidad||0),0);
+  const disp=getDisponible(mat);
+  setText('modal-ver-sal-title',`📋 Salidas de: ${mat.material}`);
+  const sum=document.getElementById('ver-salidas-summary');
+  sum.innerHTML=`
+    <div style="text-align:center"><div style="font-size:11px;color:#64748b;text-transform:uppercase;font-weight:700">Existencia</div><div style="font-size:24px;font-weight:700;color:var(--primary-light)">${mat.existencia}</div></div>
+    <div style="text-align:center"><div style="font-size:11px;color:#64748b;text-transform:uppercase;font-weight:700">Total Salidas</div><div style="font-size:24px;font-weight:700;color:var(--danger)">${totalSal}</div></div>
+    <div style="text-align:center"><div style="font-size:11px;color:#64748b;text-transform:uppercase;font-weight:700">Disponible</div><div style="font-size:24px;font-weight:700;color:${disp>0?'var(--success)':'var(--danger)'}">${disp}</div></div>
+  `;
+  const list=document.getElementById('ver-salidas-list');
+  if(!matSalidas.length){ list.innerHTML='<p style="text-align:center;color:#94a3b8;padding:20px">No hay salidas registradas para este material</p>'; }
+  else{
+    list.innerHTML=`<div class="salidas-list">${matSalidas.map(s=>`
+      <div class="salida-item">
+        <div><span class="salida-qty">-${s.cantidad}${s.unidad?' '+s.unidad:''}</span><span class="salida-info"> — ${esc(s.responsable)}</span></div>
+        <div class="salida-info">${fmtDate(s.fecha)}</div>
+      </div>`).join('')}</div>`;
+  }
+  open('modal-ver-salidas');
+}
+ 
+// AUTOCOMPLETE MATERIAL
+function showAC(){
+  const q=val('m-material').toLowerCase(), list=document.getElementById('ac-list');
+  if(!q||q.length<2){ list.style.display='none'; return; }
+  const matches=[...new Set(allMaterials.map(m=>m.material))].filter(m=>m.toLowerCase().includes(q)).slice(0,8);
+  if(!matches.length){ list.style.display='none'; return; }
+  list.innerHTML=matches.map(m=>`<div class="autocomplete-item" onclick="selectAC('m-material','ac-list','${esc(m)}')">${esc(m)}</div>`).join('');
+  list.style.display='block';
+}
+function showACSalida(){
+  const q=val('s-material').toLowerCase(), list=document.getElementById('ac-sal-list');
+  if(!q||q.length<2){ list.style.display='none'; return; }
+  const matches=allMaterials.filter(m=>m.material.toLowerCase().includes(q)).slice(0,8);
+  if(!matches.length){ list.style.display='none'; return; }
+  list.innerHTML=matches.map(m=>`<div class="autocomplete-item" onclick="selectACSalida('${m.id}')">${esc(m.material)}${m.unidad?' <small style=color:#94a3b8>'+esc(m.unidad)+'</small>':''} <span style="color:${getDisponible(m)>0?'var(--success)':'var(--danger)'}">• Disp: ${getDisponible(m)}</span></div>`).join('');
+  list.style.display='block';
+}
+function selectAC(inpId,listId,v){ setVal(inpId,v); document.getElementById(listId).style.display='none'; }
+function selectACSalida(matId){ const m=allMaterials.find(x=>x.id===matId); if(!m) return; setVal('s-material',m.material); currentSalidaMat=m; showDispInfo(m); document.getElementById('ac-sal-list').style.display='none'; }
+document.addEventListener('click',e=>{ if(!e.target.closest('.autocomplete-wrap')){ document.querySelectorAll('.autocomplete-list').forEach(l=>l.style.display='none'); } });
+ 
+// IMPORT EXCEL
+let importData=[];
+function handleImport(e){
+  const file=e.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'array',cellDates:true});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false});
+      if(rows.length<2) return toast('⚠️ El archivo está vacío','error');
+      importData=[];
+      for(let i=1;i<rows.length;i++){
+        const r=rows[i]; if(!r[0]) continue;
+        importData.push({ material:String(r[0]||'').trim(), existencia:parseFloat(String(r[1]||'0').replace(',','.'))||0, fechaIngreso:parseImportDate(r[2]), notas:String(r[3]||'').trim() });
+      }
+      if(!importData.length) return toast('⚠️ No se encontraron datos válidos','error');
+      setText('import-count-label',`Vista previa: ${importData.length} registros encontrados`);
+      document.getElementById('import-preview').innerHTML=`<table><thead><tr><th>#</th><th>Material</th><th>Existencia</th><th>F. Ingreso</th></tr></thead><tbody>${importData.slice(0,20).map((r,i)=>`<tr><td style="color:#94a3b8">${i+1}</td><td><b>${esc(r.material)}</b></td><td>${r.existencia}</td><td>${r.fechaIngreso?r.fechaIngreso.toLocaleDateString('es'):'—'}</td></tr>`).join('')}${importData.length>20?`<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:8px">...y ${importData.length-20} más</td></tr>`:''}</tbody></table>`;
+      document.getElementById('import-preview-wrap').style.display='block';
+    }catch(err){ toast('❌ Error al leer archivo: '+err.message,'error'); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+function parseImportDate(v){
+  if(!v) return null; const s=String(v).trim(); if(!s) return null;
+  const d=new Date(s); if(!isNaN(d.getTime())) return d;
+  const p=s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(p) return new Date(`${p[3].length===2?'20'+p[3]:p[3]}-${p[2].padStart(2,'0')}-${p[1].padStart(2,'0')}`);
+  return null;
+}
+async function confirmImport(){
+  if(!importData.length) return;
+  const btn=event.target; btn.disabled=true; btn.textContent='Importando...';
+  try{
+    const batch=db.batch();
+    importData.forEach(r=>{ const ref=db.collection('inventario').doc(); batch.set(ref,{...r,creadoPor:currentUser.email,creadoEn:firebase.firestore.FieldValue.serverTimestamp(),actualizadoEn:firebase.firestore.FieldValue.serverTimestamp()}); });
+    await batch.commit();
+    toast(`✅ ${importData.length} materiales importados`,'success');
+    clearImport(); await loadAllData(); goPage('inventario');
+  }catch(e){ toast('❌ Error al importar: '+e.message,'error'); }
+  finally{ btn.disabled=false; btn.textContent='✅ Importar todos'; }
+}
+function clearImport(){ importData=[]; document.getElementById('import-preview-wrap').style.display='none'; document.getElementById('file-input').value=''; }
+ 
+// USUARIOS
+async function loadUsers(){
+  if(currentUserProfile.rol!=='admin') return;
+  const tbody=document.getElementById('users-tbody');
+  tbody.innerHTML='<tr><td colspan="5" class="loading"><div class="spinner"></div></td></tr>';
+  try{
+    const snap=await db.collection('usuarios').get();
+    const users=snap.docs.map(d=>({id:d.id,...d.data()}));
+    if(!users.length){ tbody.innerHTML='<tr><td colspan="5" class="empty-table">No hay usuarios</td></tr>'; return; }
+    tbody.innerHTML=users.map(u=>`<tr><td><b>${esc(u.nombre||'—')}</b></td><td>${esc(u.email||'—')}</td><td><span class="badge ${u.rol==='admin'?'badge-orange':'badge-blue'}">${u.rol==='admin'?'👑 Admin':'👤 Usuario'}</span></td><td>${u.creadoEn?(u.creadoEn.toDate?u.creadoEn.toDate().toLocaleDateString('es'):u.creadoEn):'—'}</td><td><div style="display:flex;gap:4px"><button class="btn btn-outline btn-sm" onclick="editUser('${u.id}','${esc(u.nombre||'')}','${u.rol||'usuario'}')">✏️ Rol</button>${u.id!==currentUser.uid?`<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${esc(u.email||'')}')">🗑️</button>`:'<span class="badge badge-gray">Tú</span>'}</div></td></tr>`).join('');
+  }catch(e){ toast('Error: '+e.message,'error'); }
+}
+function openAddUser(){ editingUserId=null; setText('modal-user-title','➕ Agregar Usuario'); setVal('u-nombre',''); setVal('u-email',''); setVal('u-pass',''); document.getElementById('u-pass-field').style.display='block'; document.getElementById('u-rol').value='usuario'; open('modal-user'); }
+function editUser(id,nombre,rol){ editingUserId=id; setText('modal-user-title','✏️ Editar Usuario'); setVal('u-nombre',nombre); setVal('u-email',''); setVal('u-pass',''); document.getElementById('u-pass-field').style.display='none'; document.getElementById('u-rol').value=rol; open('modal-user'); }
+async function saveUser(){
+  const nombre=val('u-nombre').trim(); if(!nombre) return toast('⚠️ El nombre es obligatorio','error');
+  if(!editingUserId){
+    const email=val('u-email').trim(), pass=val('u-pass');
+    if(!email) return toast('⚠️ El correo es obligatorio','error');
+    if(!pass||pass.length<6) return toast('⚠️ La contraseña debe tener mínimo 6 caracteres','error');
+    try{
+      const secApp=firebase.initializeApp(getSavedConfig(),'secondary-'+Date.now());
+      const cred=await secApp.auth().createUserWithEmailAndPassword(email,pass);
+      await secApp.auth().signOut(); secApp.delete();
+      await db.collection('usuarios').doc(cred.user.uid).set({ nombre, email, rol:val('u-rol'), creadoEn:firebase.firestore.FieldValue.serverTimestamp() });
+      toast('✅ Usuario creado','success');
+    }catch(e){ const m={'auth/email-already-in-use':'❌ Ese correo ya está registrado.','auth/invalid-email':'❌ Correo inválido.'}; return toast(m[e.code]||'❌ '+e.message,'error'); }
+  }else{
+    await db.collection('usuarios').doc(editingUserId).update({ nombre, rol:val('u-rol') });
+    toast('✅ Usuario actualizado','success');
+  }
+  closeModal('modal-user'); loadUsers();
+}
+function deleteUser(id,email){ confirmAction(`¿Eliminar usuario "${email}"?`,'Se eliminará su perfil del sistema.',async()=>{ await db.collection('usuarios').doc(id).delete(); toast('🗑️ Usuario eliminado','info'); loadUsers(); }); }
+ 
+// EXPORT EXCEL
+async function exportExcel(mode){
+  try{
+    let rows=[];
+    if(mode==='inventario'||mode==='disponible'){
+      let mats=allMaterials;
+      if(mode==='disponible') mats=mats.filter(m=>getDisponible(m)>0);
+      rows=mats.map(m=>({ 'Material':m.material,'Existencia':m.existencia,'Unidad':m.unidad||'','Total Salidas':salidasMap[m.id]||0,'Disponible':getDisponible(m),'Fecha de Ingreso':fmtDate(m.fechaIngreso),'Notas':m.notas||'' }));
+    } else if(mode==='salidas'){
+      rows=allSalidas.map(s=>({ 'Material':s.material,'Cantidad Salida':s.cantidad,'Unidad':s.unidad||'','Fecha de Salida':fmtDate(s.fecha),'Responsable':s.responsable||'','Notas':s.notas||'' }));
+    } else if(mode==='rango'){
+      const desde=val('exp-desde'), hasta=val('exp-hasta');
+      if(!desde&&!hasta) return toast('⚠️ Selecciona al menos una fecha','error');
+      rows=allSalidas.filter(s=>{
+        const f=s.fecha?(s.fecha.toDate?s.fecha.toDate():new Date(s.fecha)):null; if(!f) return true;
+        if(desde&&f<new Date(desde)) return false;
+        if(hasta&&f>new Date(hasta+'T23:59:59')) return false;
+        return true;
+      }).map(s=>({ 'Material':s.material,'Cantidad Salida':s.cantidad,'Unidad':s.unidad||'','Fecha':fmtDate(s.fecha),'Responsable':s.responsable||'','Notas':s.notas||'' }));
+    }
+    if(!rows.length) return toast('⚠️ No hay datos para exportar','error');
+    const ws=XLSX.utils.json_to_sheet(rows);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'Datos');
+    XLSX.writeFile(wb,`inventario-${mode}-${new Date().toISOString().split('T')[0]}.xlsx`);
+    toast(`✅ ${rows.length} registros exportados`,'success');
+  }catch(e){ toast('❌ Error al exportar: '+e.message,'error'); }
+}
+ 
+// CONFIRM
+function confirmAction(title,msg,cb){ setText('confirm-title',title); setText('confirm-msg',msg); open('confirm-overlay'); document.getElementById('confirm-ok').onclick=async()=>{ closeConfirm(); await cb(); }; }
+function closeConfirm(){ close('confirm-overlay'); }
+ 
+// UTILS
+function show(id){ const e=document.getElementById(id); if(e) e.style.display='flex'; }
+function hide(id){ const e=document.getElementById(id); if(e) e.style.display='none'; }
+function open(id){ document.getElementById(id).classList.add('open'); }
+function close(id){ document.getElementById(id).classList.remove('open'); }
+function closeModal(id){ close(id); editingMatId=null; editingSalidaId=null; }
+function val(id){ const e=document.getElementById(id); return e?e.value:''; }
+function setVal(id,v){ const e=document.getElementById(id); if(e) e.value=v; }
+function setText(id,t){ const e=document.getElementById(id); if(e) e.textContent=t; }
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+function showError(id,msg){ const e=document.getElementById(id); e.textContent=msg; e.style.display='block'; }
+function hideError(id){ const e=document.getElementById(id); e.style.display='none'; }
+function highlight(text,q){ if(!q) return text; return text.replace(new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<mark>$1</mark>'); }
+function fmtDate(v){ if(!v) return '—'; const d=v.toDate?v.toDate():new Date(v); if(isNaN(d.getTime())) return '—'; return d.toLocaleDateString('es',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+function toInputDate(v){ if(!v) return ''; const d=v.toDate?v.toDate():new Date(v); if(isNaN(d.getTime())) return ''; return d.toISOString().split('T')[0]; }
+function toast(msg,type='info'){ const c=document.getElementById('toast-container'); const t=document.createElement('div'); t.className='toast '+type; t.innerHTML=msg; c.appendChild(t); setTimeout(()=>{ t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),300); },3500); }
+ 
+document.addEventListener('keydown',e=>{ if(e.key==='Enter'){ if(document.getElementById('login-screen').style.display!=='none') doLogin(); } });
+ 
+initApp();
+</script>
+</body>
+</html>
+ 
