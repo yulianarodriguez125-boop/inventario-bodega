@@ -1030,6 +1030,10 @@ document.addEventListener('click',e=>{ if(!e.target.closest('.autocomplete-wrap'
  
 // IMPORT EXCEL
 let importData=[];
+function normalizeHeader(h){ return String(h||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim(); }
+function findCol(headers, terms){ return headers.findIndex(h=>terms.some(t=>normalizeHeader(h).includes(t))); }
+function parseNum(v){ if(v===undefined||v===null||v==='') return 0; return parseFloat(String(v).replace(',','.'))||0; }
+ 
 function handleImport(e){
   const file=e.target.files[0]; if(!file) return;
   const reader=new FileReader();
@@ -1039,14 +1043,37 @@ function handleImport(e){
       const ws=wb.Sheets[wb.SheetNames[0]];
       const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false});
       if(rows.length<2) return toast('⚠️ El archivo está vacío','error');
+      const headers=rows[0];
+      // Detectar columnas por nombre
+      const iMat  = findCol(headers,['material','nombre','descripcion','producto','articulo']);
+      const iExist = findCol(headers,['existencia','cantidad','stock','cant','qty','ingreso','entrada']);
+      const iSal  = findCol(headers,['salida','rebajo','egreso','consumo','retirado','salidas']);
+      const iFecha = findCol(headers,['fecha','date','ingreso','f.ingreso','f. ingreso']);
+      const iUnidad= findCol(headers,['unidad','und','medida','unit']);
+      const iResp  = findCol(headers,['responsable','responsable salida','entregado','persona','resp']);
+      const iNotas = findCol(headers,['nota','notas','observacion','obs','comentario','detalle']);
+      const colMat   = iMat>=0   ? iMat   : 0;
+      const colExist = iExist>=0 ? iExist : 1;
+      const colSal   = iSal>=0   ? iSal   : -1;
+      const colFecha = iFecha>=0 ? iFecha : 2;
+      const colUnidad= iUnidad>=0? iUnidad: -1;
+      const colResp  = iResp>=0  ? iResp  : -1;
+      const colNotas = iNotas>=0 ? iNotas : 3;
       importData=[];
       for(let i=1;i<rows.length;i++){
-        const r=rows[i]; if(!r[0]) continue;
-        importData.push({ material:String(r[0]||'').trim(), existencia:parseFloat(String(r[1]||'0').replace(',','.'))||0, fechaIngreso:parseImportDate(r[2]), notas:String(r[3]||'').trim() });
+        const r=rows[i];
+        const mat=String(r[colMat]||'').trim(); if(!mat) continue;
+        const existencia=parseNum(r[colExist]);
+        const salida=colSal>=0 ? parseNum(r[colSal]) : 0;
+        const unidad=colUnidad>=0 ? String(r[colUnidad]||'').trim() : '';
+        const resp=colResp>=0 ? String(r[colResp]||'').trim() : '';
+        importData.push({ material:mat, existencia, salida, unidad, fechaIngreso:parseImportDate(r[colFecha]), responsable:resp, notas:String(r[colNotas]||'').trim() });
       }
       if(!importData.length) return toast('⚠️ No se encontraron datos válidos','error');
-      setText('import-count-label',`Vista previa: ${importData.length} registros encontrados`);
-      document.getElementById('import-preview').innerHTML=`<table><thead><tr><th>#</th><th>Material</th><th>Existencia</th><th>F. Ingreso</th></tr></thead><tbody>${importData.slice(0,20).map((r,i)=>`<tr><td style="color:#94a3b8">${i+1}</td><td><b>${esc(r.material)}</b></td><td>${r.existencia}</td><td>${r.fechaIngreso?r.fechaIngreso.toLocaleDateString('es'):'—'}</td></tr>`).join('')}${importData.length>20?`<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:8px">...y ${importData.length-20} más</td></tr>`:''}</tbody></table>`;
+      const conSalida=importData.filter(r=>r.salida>0).length;
+      setText('import-count-label',`Vista previa: ${importData.length} registros${conSalida>0?' ('+conSalida+' con salida)':''}`);
+      const hasSal=importData.some(r=>r.salida>0);
+      document.getElementById('import-preview').innerHTML=`<table><thead><tr><th>#</th><th>Material</th><th>Existencia</th>${hasSal?'<th style="color:#f97316">Salida</th><th style="color:#16a34a">Disponible</th>':''}<th>F. Ingreso</th></tr></thead><tbody>${importData.slice(0,20).map((r,i)=>{const disp=r.existencia-r.salida;return`<tr><td style="color:#94a3b8">${i+1}</td><td><b>${esc(r.material)}</b></td><td>${r.existencia}</td>${hasSal?`<td style="color:#f97316">${r.salida||0}</td><td style="color:${disp>0?'#16a34a':'#dc2626'};font-weight:700">${disp}</td>`:''}<td>${r.fechaIngreso?r.fechaIngreso.toLocaleDateString('es'):'—'}</td></tr>`}).join('')}${importData.length>20?`<tr><td colspan="${hasSal?6:4}" style="text-align:center;color:#94a3b8;padding:8px">...y ${importData.length-20} más</td></tr>`:''}</tbody></table>`;
       document.getElementById('import-preview-wrap').style.display='block';
     }catch(err){ toast('❌ Error al leer archivo: '+err.message,'error'); }
   };
@@ -1063,10 +1090,37 @@ async function confirmImport(){
   if(!importData.length) return;
   const btn=event.target; btn.disabled=true; btn.textContent='Importando...';
   try{
-    const batch=db.batch();
-    importData.forEach(r=>{ const ref=db.collection('inventario').doc(); batch.set(ref,{...r,creadoPor:currentUser.email,creadoEn:firebase.firestore.FieldValue.serverTimestamp(),actualizadoEn:firebase.firestore.FieldValue.serverTimestamp()}); });
-    await batch.commit();
-    toast(`✅ ${importData.length} materiales importados`,'success');
+    // Guardar materiales en lotes de 499
+    const matChunks=[];
+    for(let i=0;i<importData.length;i+=499) matChunks.push(importData.slice(i,i+499));
+    const matIds=[];
+    for(const chunk of matChunks){
+      const batch=db.batch();
+      chunk.forEach(r=>{
+        const ref=db.collection('inventario').doc();
+        matIds.push({id:ref.id, r});
+        const {salida,responsable,...matData}=r;
+        batch.set(ref,{...matData,creadoPor:currentUser.email,creadoEn:firebase.firestore.FieldValue.serverTimestamp(),actualizadoEn:firebase.firestore.FieldValue.serverTimestamp()});
+      });
+      await batch.commit();
+    }
+    // Guardar salidas para los materiales que tengan salida > 0
+    const conSalida=matIds.filter(({r})=>r.salida>0);
+    if(conSalida.length>0){
+      const salChunks=[];
+      for(let i=0;i<conSalida.length;i+=499) salChunks.push(conSalida.slice(i,i+499));
+      for(const chunk of salChunks){
+        const batch=db.batch();
+        chunk.forEach(({id,r})=>{
+          const ref=db.collection('salidas').doc();
+          batch.set(ref,{ materialId:id, material:r.material, unidad:r.unidad||'', cantidad:r.salida, fecha:r.fechaIngreso||new Date(), responsable:r.responsable||'Importado', notas:'Importado desde Excel', creadoPor:currentUser.email, creadoEn:firebase.firestore.FieldValue.serverTimestamp() });
+        });
+        await batch.commit();
+      }
+      toast(`✅ ${importData.length} materiales y ${conSalida.length} salidas importados`,'success');
+    } else {
+      toast(`✅ ${importData.length} materiales importados`,'success');
+    }
     clearImport(); await loadAllData(); goPage('inventario');
   }catch(e){ toast('❌ Error al importar: '+e.message,'error'); }
   finally{ btn.disabled=false; btn.textContent='✅ Importar todos'; }
