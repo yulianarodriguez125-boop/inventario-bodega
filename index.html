@@ -407,7 +407,10 @@
  
       <!-- IMPORTAR -->
       <div id="page-importar" class="page">
-        <div style="margin-bottom:18px"><h2 style="font-size:20px;font-weight:700">📥 Importar desde Excel</h2><p style="font-size:13px;color:var(--text-light);margin-top:3px">Carga tu archivo Excel existente de una sola vez</p></div>
+        <div style="margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div><h2 style="font-size:20px;font-weight:700">📥 Importar desde Excel</h2><p style="font-size:13px;color:var(--text-light);margin-top:3px">Carga tu archivo Excel existente de una sola vez</p></div>
+          <button class="btn admin-only" onclick="confirmarBorrarTodo()" style="background:#fee2e2;color:#dc2626;border:1.5px solid #fca5a5;font-size:13px;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">🗑️ Borrar todo el inventario</button>
+        </div>
         <div class="card">
           <div class="card-header"><h3>Formato requerido del Excel</h3></div>
           <div class="card-body">
@@ -769,9 +772,12 @@ function buildSalidasMap(){
   });
 }
  
+function getExistencia(mat){
+  return Number(mat.existencia ?? mat.cantidad) || 0;
+}
 function getDisponible(mat){
   const salidas = salidasMap[mat.id]||0;
-  return (Number(mat.existencia)||0) - salidas;
+  return getExistencia(mat) - salidas;
 }
  
 // DASHBOARD
@@ -790,7 +796,7 @@ function renderDashboard(){
   // Recent materials
   const tbody=document.getElementById('recent-tbody');
   if(!allMaterials.length){ tbody.innerHTML='<tr><td colspan="5" class="empty-table">📭 No hay materiales aún</td></tr>'; }
-  else{ tbody.innerHTML=allMaterials.slice(0,7).map(m=>{ const disp=getDisponible(m); return `<tr><td><b>${esc(m.material)}</b>${m.unidad?'<small style="color:#94a3b8"> '+esc(m.unidad)+'</small>':''}</td><td>${m.existencia}</td><td>${salidasMap[m.id]||0}</td><td><span class="disponible-num ${disp>0?'ok':disp===0?'empty':'empty'}">${disp}</span></td><td>${fmtDate(m.fechaIngreso)}</td></tr>`; }).join(''); }
+  else{ tbody.innerHTML=allMaterials.slice(0,7).map(m=>{ const disp=getDisponible(m); return `<tr><td><b>${esc(m.material)}</b>${m.unidad?'<small style="color:#94a3b8"> '+esc(m.unidad)+'</small>':''}</td><td>${getExistencia(m)}</td><td>${salidasMap[m.id]||0}</td><td><span class="disponible-num ${disp>0?'ok':disp===0?'empty':'empty'}">${disp}</span></td><td>${fmtDate(m.fechaIngreso)}</td></tr>`; }).join(''); }
   // Recent salidas
   const stbody=document.getElementById('recent-salidas-tbody');
   if(!allSalidas.length){ stbody.innerHTML='<tr><td colspan="4" class="empty-table">📭 No hay salidas registradas</td></tr>'; }
@@ -820,7 +826,7 @@ function renderInv(recs){
     const sal=salidasMap[m.id]||0;
     return `<tr>
       <td><b>${highlight(esc(m.material),q)}</b>${m.unidad?'<br><small style="color:#94a3b8">'+esc(m.unidad)+'</small>':''}</td>
-      <td style="font-weight:600">${m.existencia}</td>
+      <td style="font-weight:600">${getExistencia(m)}</td>
       <td style="color:var(--danger);font-weight:600">${sal>0?'-'+sal:sal}</td>
       <td><span class="disponible-num ${cls}" style="font-size:15px">${disp}</span></td>
       <td>${fmtDate(m.fechaIngreso)}</td>
@@ -890,7 +896,7 @@ function openAddModal(){
 function editMat(id){
   const m=allMaterials.find(x=>x.id===id); if(!m) return;
   editingMatId=id; setText('modal-mat-title','✏️ Editar Material');
-  setVal('m-material',m.material||''); setVal('m-existencia',m.existencia||'');
+  setVal('m-material',m.material||''); setVal('m-existencia',getExistencia(m)||'');
   setVal('m-unidad',m.unidad||''); setVal('m-fecha-ingreso',toInputDate(m.fechaIngreso)); setVal('m-notas',m.notas||'');
   open('modal-mat');
 }
@@ -946,7 +952,7 @@ function showDispInfo(m){
   const disp=getDisponible(m);
   const info=document.getElementById('s-disponible-info');
   info.style.display='block';
-  document.getElementById('s-disp-text').innerHTML=`<b>${esc(m.material)}</b> — Existencia: <b>${m.existencia}${m.unidad?' '+m.unidad:''}</b> | Total salidas: <b>${salidasMap[m.id]||0}</b> | <span style="color:${disp>0?'var(--success)':'var(--danger)'}"><b>Disponible: ${disp}</b></span>`;
+  document.getElementById('s-disp-text').innerHTML=`<b>${esc(m.material)}</b> — Existencia: <b>${getExistencia(m)}${m.unidad?' '+m.unidad:''}</b> | Total salidas: <b>${salidasMap[m.id]||0}</b> | <span style="color:${disp>0?'var(--success)':'var(--danger)'}"><b>Disponible: ${disp}</b></span>`;
 }
 async function saveSalida(){
   const material=val('s-material').trim(), cantidad=parseFloat(val('s-cantidad'));
@@ -985,7 +991,7 @@ function verSalidas(matId){
   setText('modal-ver-sal-title',`📋 Salidas de: ${mat.material}`);
   const sum=document.getElementById('ver-salidas-summary');
   sum.innerHTML=`
-    <div style="text-align:center"><div style="font-size:11px;color:#64748b;text-transform:uppercase;font-weight:700">Existencia</div><div style="font-size:24px;font-weight:700;color:var(--primary-light)">${mat.existencia}</div></div>
+    <div style="text-align:center"><div style="font-size:11px;color:#64748b;text-transform:uppercase;font-weight:700">Existencia</div><div style="font-size:24px;font-weight:700;color:var(--primary-light)">${getExistencia(mat)}</div></div>
     <div style="text-align:center"><div style="font-size:11px;color:#64748b;text-transform:uppercase;font-weight:700">Total Salidas</div><div style="font-size:24px;font-weight:700;color:var(--danger)">${totalSal}</div></div>
     <div style="text-align:center"><div style="font-size:11px;color:#64748b;text-transform:uppercase;font-weight:700">Disponible</div><div style="font-size:24px;font-weight:700;color:${disp>0?'var(--success)':'var(--danger)'}">${disp}</div></div>
   `;
@@ -1067,6 +1073,34 @@ async function confirmImport(){
 }
 function clearImport(){ importData=[]; document.getElementById('import-preview-wrap').style.display='none'; document.getElementById('file-input').value=''; }
  
+async function confirmarBorrarTodo(){
+  const confirmar = prompt('⚠️ Esto borrará TODO el inventario y TODAS las salidas.\n\nEscribí BORRAR para confirmar:');
+  if(confirmar !== 'BORRAR') return toast('Operación cancelada.','error');
+  const btn = document.querySelector('[onclick="confirmarBorrarTodo()"]');
+  btn.disabled=true; btn.textContent='Borrando...';
+  try{
+    // Borrar inventario en lotes de 500
+    let snap = await db.collection('inventario').limit(500).get();
+    while(!snap.empty){
+      const batch=db.batch();
+      snap.docs.forEach(d=>batch.delete(d.ref));
+      await batch.commit();
+      snap = await db.collection('inventario').limit(500).get();
+    }
+    // Borrar salidas en lotes de 500
+    snap = await db.collection('salidas').limit(500).get();
+    while(!snap.empty){
+      const batch=db.batch();
+      snap.docs.forEach(d=>batch.delete(d.ref));
+      await batch.commit();
+      snap = await db.collection('salidas').limit(500).get();
+    }
+    await loadAllData();
+    toast('✅ Todo el inventario fue borrado. Ya podés importar tu Excel.','success');
+  }catch(e){ toast('❌ Error: '+e.message,'error'); }
+  finally{ btn.disabled=false; btn.textContent='🗑️ Borrar todo el inventario'; }
+}
+ 
 // USUARIOS
 async function loadUsers(){
   if(currentUserProfile.rol!=='admin') return;
@@ -1109,7 +1143,7 @@ async function exportExcel(mode){
     if(mode==='inventario'||mode==='disponible'){
       let mats=allMaterials;
       if(mode==='disponible') mats=mats.filter(m=>getDisponible(m)>0);
-      rows=mats.map(m=>({ 'Material':m.material,'Existencia':m.existencia,'Unidad':m.unidad||'','Total Salidas':salidasMap[m.id]||0,'Disponible':getDisponible(m),'Fecha de Ingreso':fmtDate(m.fechaIngreso),'Notas':m.notas||'' }));
+      rows=mats.map(m=>({ 'Material':m.material,'Existencia':getExistencia(m),'Unidad':m.unidad||'','Total Salidas':salidasMap[m.id]||0,'Disponible':getDisponible(m),'Fecha de Ingreso':fmtDate(m.fechaIngreso),'Notas':m.notas||'' }));
     } else if(mode==='salidas'){
       rows=allSalidas.map(s=>({ 'Material':s.material,'Cantidad Salida':s.cantidad,'Unidad':s.unidad||'','Fecha de Salida':fmtDate(s.fecha),'Responsable':s.responsable||'','Notas':s.notas||'' }));
     } else if(mode==='rango'){
@@ -1158,4 +1192,3 @@ initApp();
 </script>
 </body>
 </html>
- 
