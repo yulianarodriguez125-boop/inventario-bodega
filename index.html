@@ -1165,6 +1165,18 @@ function clearImport(){ importData=[]; document.getElementById('import-preview-w
 // ── IMPORTAR DESDE PDF ──
 let pdfImportData=[];
  
+// Parsear número en formato costarricense (puntos=miles, coma=decimal) o estándar
+function parseCRNum(v){
+  if(v===undefined||v===null||v==='') return 0;
+  const s=String(v).trim().replace(/\s/g,'');
+  // Formato CR: 4,00 o 67.500,00
+  if(/^\d{1,3}(\.\d{3})*(,\d+)?$/.test(s)) return parseFloat(s.replace(/\./g,'').replace(',','.'))||0;
+  // Formato estándar: 4.00 o 67,500.00
+  if(/^\d{1,3}(,\d{3})*(\.\d+)?$/.test(s)) return parseFloat(s.replace(/,/g,''))||0;
+  // Intentar directo
+  return parseFloat(s.replace(',','.'))||0;
+}
+ 
 async function handlePdfImport(e){
   const file=e.target.files[0]; if(!file) return;
   toast('📄 Leyendo factura...','info');
@@ -1173,117 +1185,136 @@ async function handlePdfImport(e){
     pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     const arrayBuffer=await file.arrayBuffer();
     const pdf=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
-    let fullText='';
-    const lines=[];
+ 
+    // Extraer todos los items con posición X,Y de todas las páginas
+    const allItems=[];
     for(let p=1;p<=pdf.numPages;p++){
       const page=await pdf.getPage(p);
       const tc=await page.getTextContent();
-      // Agrupar items por línea (Y similar)
-      const items=tc.items.sort((a,b)=>b.transform[5]-a.transform[5]||a.transform[4]-b.transform[4]);
-      let lastY=null, currentLine=[];
-      for(const item of items){
-        const y=Math.round(item.transform[5]);
-        if(lastY!==null && Math.abs(y-lastY)>3){ lines.push(currentLine); currentLine=[]; }
-        currentLine.push({text:item.str.trim(),x:item.transform[4],y});
-        lastY=y;
-      }
-      if(currentLine.length) lines.push(currentLine);
+      tc.items.forEach(item=>{
+        if(item.str.trim()) allItems.push({ text:item.str.trim(), x:Math.round(item.transform[4]), y:Math.round(item.transform[5]) });
+      });
     }
  
-    // Detectar proveedor
-    const allText=lines.map(l=>l.map(i=>i.text).join(' ')).join('\n');
-    let proveedor='';
-    const provMatch=allText.match(/^(.+?)[\n\r]|Constructora\s+\w+|Proveedor[:\s]+(.+)/im);
-    if(provMatch) proveedor=provMatch[1]||provMatch[2]||'';
+    // Agrupar items en líneas por Y (tolerancia 4px)
+    allItems.sort((a,b)=>b.y-a.y||a.x-b.x);
+    const lines=[];
+    let curY=null, curLine=[];
+    for(const item of allItems){
+      if(curY===null||Math.abs(item.y-curY)>4){ if(curLine.length) lines.push(curLine); curLine=[item]; curY=item.y; }
+      else curLine.push(item);
+    }
+    if(curLine.length) lines.push(curLine);
  
-    // Detectar fecha de factura
+    const lineTexts=lines.map(l=>l.map(i=>i.text).join(' '));
+    const allText=lineTexts.join('\n');
+ 
+    // Detectar proveedor (primera línea no vacía)
+    let proveedor='';
+    for(const lt of lineTexts){ if(lt.trim().length>3){ proveedor=lt.trim().slice(0,80); break; } }
+ 
+    // Detectar fecha
     let fechaFactura=null;
-    const fechaMatch=allText.match(/Fecha\s+documento[:\s]+(\d{1,2}\/\d{2}\/\d{4})/i)||allText.match(/(\d{1,2}\/\d{2}\/\d{4})/);
+    const fechaMatch=allText.match(/Fecha\s*documento[:\s]+(\d{1,2}\/\d{1,2}\/\d{4})/i)||allText.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
     if(fechaMatch) fechaFactura=parseImportDate(fechaMatch[1]);
  
-    // Buscar tabla: encabezado con "Concepto" o "Descripcion" + "Cantidad"
+    // ── BUSCAR TABLA DE PRODUCTOS ──
     pdfImportData=[];
-    let tableStarted=false;
-    let colConcepto=-1,colUnidad=-1,colCantidad=-1,colCodigo=-1;
  
-    for(let li=0;li<lines.length;li++){
-      const lineTexts=lines[li].map(i=>i.text.toLowerCase());
-      const lineJoined=lineTexts.join(' ');
+    // Paso 1: encontrar línea de encabezado de la tabla
+    let headerLineIdx=-1;
+    let xConcepto=-1, xUnidad=-1, xCantidad=-1, xCodigo=-1, xPrecio=-1;
  
-      // Detectar fila de encabezado de tabla
-      if(!tableStarted && (lineJoined.includes('concepto')||lineJoined.includes('descripci'))){
-        const xs=lines[li].map(i=>i.x);
-        lines[li].forEach((item,idx)=>{
-          const t=item.text.toLowerCase();
-          if(t.includes('concepto')||t.includes('descripci')||t.includes('detalle')) colConcepto=idx;
-          else if(t.includes('unidad')||t==='und'||t==='u.m') colUnidad=idx;
-          else if(t.includes('cantidad')||t==='cant'||t==='qty') colCantidad=idx;
-          else if(t.includes('codigo')||t.includes('código')||t==='cod') colCodigo=idx;
+    for(let i=0;i<lines.length;i++){
+      const lt=lineTexts[i].toLowerCase();
+      if((lt.includes('concepto')||lt.includes('descripci'))&&(lt.includes('cantidad')||lt.includes('unidad'))){
+        headerLineIdx=i;
+        // Guardar posición X de cada columna
+        lines[i].forEach(item=>{
+          const t=item.text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+          if(t.includes('concepto')||t.includes('descripci')) xConcepto=item.x;
+          else if(t.includes('unidad')||t==='und') xUnidad=item.x;
+          else if(t.includes('cantidad')||t==='cant') xCantidad=item.x;
+          else if(t.includes('codigo')||t.includes('cod')) xCodigo=item.x;
+          else if(t.includes('precio')) xPrecio=item.x;
         });
-        tableStarted=true;
-        continue;
-      }
- 
-      if(!tableStarted) continue;
- 
-      // Fin de tabla si línea contiene totales
-      if(lineJoined.includes('subtotal')||lineJoined.includes('total')&&lineJoined.includes('¢')||lineJoined.includes('importe total')) break;
- 
-      // Intentar extraer fila de datos
-      const cells=lines[li].map(i=>i.text);
-      if(!cells.length||cells.every(c=>!c)) continue;
- 
-      // Buscar número de cantidad en la línea (patrón: número con decimales)
-      let concepto='',unidad='',cantidad=0;
- 
-      // Método 1: usar índices de columna detectados
-      if(colConcepto>=0 && colCantidad>=0 && cells.length>Math.max(colConcepto,colCantidad)){
-        concepto=cells[colConcepto]||'';
-        cantidad=parseNum(cells[colCantidad]);
-        if(colUnidad>=0) unidad=cells[colUnidad]||'';
-      } else {
-        // Método 2: heurístico — buscar patrón [texto] [unidad?] [número]
-        const numMatches=cells.map((c,i)=>({i,v:parseNum(c),raw:c})).filter(x=>x.v>0&&/^\d/.test(x.raw));
-        if(!numMatches.length) continue;
-        // La cantidad suele ser el primer número positivo razonable (>0 y <100000)
-        const cantCell=numMatches.find(x=>x.v>0&&x.v<100000);
-        if(!cantCell) continue;
-        cantidad=cantCell.v;
-        // El concepto es el texto más largo antes del número
-        const beforeNum=cells.slice(0,cantCell.i);
-        concepto=beforeNum.filter(c=>c&&!/^\d+$/.test(c)&&c.length>2).join(' ').trim();
-        // Unidad: buscar celda corta (2-3 chars) que sea texto
-        const unidadCell=cells.find(c=>c&&c.length<=4&&/^[A-Za-z]+$/.test(c)&&!['de','la','el','los'].includes(c.toLowerCase()));
-        if(unidadCell) unidad=unidadCell;
-      }
- 
-      concepto=concepto.replace(/\s+/g,' ').trim();
-      if(!concepto||concepto.length<3||cantidad<=0) continue;
-      // Filtrar líneas que son claramente datos de encabezado o totales
-      if(/^(información|boleta|proyecto|estimaci)/i.test(concepto)) continue;
- 
-      pdfImportData.push({ material:concepto, existencia:cantidad, salida:0, unidad, fechaIngreso:fechaFactura||new Date(), responsable:'', notas:`Factura: ${file.name}` });
-    }
- 
-    if(!pdfImportData.length){
-      // Fallback: buscar patrón general de [descripción] [M3/UND/etc] [número]
-      const unitPattern=/\b(M3|ML|M2|UND|KG|TON|LTS?|GLS?|MTS?|CMS?|PZA|PAQ)\b/i;
-      const numPattern=/\b(\d{1,6}(?:[.,]\d{1,3})?)\b/;
-      for(const line of lines){
-        const txt=line.map(i=>i.text).join(' ');
-        if(!unitPattern.test(txt)) continue;
-        const unitM=txt.match(unitPattern);
-        const numM=txt.match(/(\d+(?:[.,]\d+)?)\s*$/);
-        if(!unitM||!numM) continue;
-        const cantidad=parseNum(numM[1]);
-        if(cantidad<=0) continue;
-        const concepto=txt.replace(unitPattern,'').replace(numPattern,'').replace(/\s+/g,' ').trim();
-        if(concepto.length<3) continue;
-        pdfImportData.push({ material:concepto, existencia:cantidad, salida:0, unidad:unitM[1].toUpperCase(), fechaIngreso:fechaFactura||new Date(), responsable:'', notas:`Factura: ${file.name}` });
+        break;
       }
     }
  
-    if(!pdfImportData.length) return toast('⚠️ No se encontraron materiales en el PDF. Verificá que sea una factura con tabla de productos.','error');
+    if(headerLineIdx<0){
+      toast('⚠️ No se encontró tabla de productos en la factura. Podés agregar los materiales manualmente.','error');
+      // Mostrar tabla vacía editable
+      pdfImportData=[{material:'',existencia:0,salida:0,unidad:'',fechaIngreso:fechaFactura||new Date(),responsable:'',notas:`Factura: ${file.name}`}];
+    } else {
+      // Paso 2: leer filas de la tabla
+      // Función para obtener texto de la columna más cercana a X
+      const getCol=(lineItems,targetX,tol=60)=>{
+        if(targetX<0) return '';
+        const sorted=lineItems.filter(i=>Math.abs(i.x-targetX)<tol).sort((a,b)=>Math.abs(a.x-targetX)-Math.abs(b.x-targetX));
+        return sorted.length?sorted[0].text:'';
+      };
+      // Función para obtener todo el texto entre x1 y x2
+      const getRange=(lineItems,x1,x2)=>lineItems.filter(i=>i.x>=x1&&(x2<0||i.x<x2)).map(i=>i.text).join(' ').trim();
+ 
+      // Determinar rango X del concepto (desde xConcepto hasta xUnidad o xCantidad)
+      const xConceptoEnd=xUnidad>xConcepto?xUnidad:(xCantidad>xConcepto?xCantidad:-1);
+ 
+      let pendingConcepto=''; // para conceptos en múltiples líneas
+ 
+      for(let i=headerLineIdx+1;i<lines.length;i++){
+        const lt=lineTexts[i].toLowerCase();
+ 
+        // Fin de tabla
+        if(/informaci.n general|subtotal|total\s+\w|servicios exentos|mercanc/i.test(lt)) break;
+        if(lines[i].every(item=>/^[\s\-_=]+$/.test(item.text))) continue;
+ 
+        const lineItems=lines[i];
+        if(!lineItems.length) continue;
+ 
+        // Extraer concepto usando rango X
+        let concepto = xConceptoEnd>0
+          ? getRange(lineItems, xConcepto-20, xConceptoEnd-5)
+          : getRange(lineItems, xConcepto-20, xCantidad>0?xCantidad-5:-1);
+ 
+        // Extraer unidad y cantidad
+        let unidad='', cantidad=0;
+        if(xUnidad>0) unidad=getCol(lineItems,xUnidad,50);
+        if(xCantidad>0){
+          const cantText=getCol(lineItems,xCantidad,50);
+          cantidad=parseCRNum(cantText);
+        }
+ 
+        // Si no hay cantidad pero sí concepto, puede ser continuación de la línea anterior
+        if(concepto && !cantidad){
+          pendingConcepto=(pendingConcepto+' '+concepto).trim();
+          continue;
+        }
+ 
+        // Recuperar concepto pendiente
+        if(pendingConcepto){ concepto=(pendingConcepto+' '+concepto).trim(); pendingConcepto=''; }
+ 
+        concepto=concepto.replace(/\s+/g,' ').trim();
+ 
+        // Ignorar si el concepto es un código puro (solo números)
+        if(/^\d+$/.test(concepto)) continue;
+        if(!concepto||concepto.length<3||cantidad<=0) continue;
+        if(/^(informaci|boleta|proyecto|estimaci|subtotal|total|servicio)/i.test(concepto)) continue;
+ 
+        // Limpiar unidad
+        unidad=unidad.replace(/\s+/g,' ').trim();
+        if(/^\d/.test(unidad)) unidad=''; // si la unidad parece número, ignorar
+ 
+        pdfImportData.push({ material:concepto, existencia:cantidad, salida:0, unidad, fechaIngreso:fechaFactura||new Date(), responsable:'', notas:`Factura: ${file.name}` });
+      }
+ 
+      if(!pdfImportData.length){
+        toast('⚠️ Se encontró la tabla pero no se pudieron leer los productos. Podés agregarlos manualmente.','error');
+        pdfImportData=[{material:'',existencia:0,salida:0,unidad:'',fechaIngreso:fechaFactura||new Date(),responsable:'',notas:`Factura: ${file.name}`}];
+      }
+    }
+ 
+    if(!pdfImportData.length) return;
  
     document.getElementById('pdf-source-info').innerHTML=`📄 <b>${esc(file.name)}</b>${proveedor?' &nbsp;·&nbsp; Proveedor: <b>'+esc(proveedor.slice(0,60))+'</b>':''}${fechaFactura?' &nbsp;·&nbsp; Fecha: <b>'+fechaFactura.toLocaleDateString('es')+'</b>':''} &nbsp;·&nbsp; <b>${pdfImportData.length}</b> material${pdfImportData.length!==1?'es':''} detectado${pdfImportData.length!==1?'s':''}`;
     renderPdfTable();
