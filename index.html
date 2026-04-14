@@ -8,6 +8,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js" crossorigin="anonymous"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous"></script>
   <style>
     :root {
       --primary: #1e3a5f; --primary-light: #2563eb; --accent: #f97316;
@@ -408,7 +409,7 @@
       <!-- IMPORTAR -->
       <div id="page-importar" class="page">
         <div style="margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-          <div><h2 style="font-size:20px;font-weight:700">📥 Importar desde Excel</h2><p style="font-size:13px;color:var(--text-light);margin-top:3px">Carga tu archivo Excel existente de una sola vez</p></div>
+          <div><h2 style="font-size:20px;font-weight:700">📥 Importar datos</h2><p style="font-size:13px;color:var(--text-light);margin-top:3px">Cargá tu archivo Excel o la factura PDF del proveedor</p></div>
           <button class="btn admin-only" onclick="confirmarBorrarTodo()" style="background:#fee2e2;color:#dc2626;border:1.5px solid #fca5a5;font-size:13px;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">🗑️ Borrar todo el inventario</button>
         </div>
         <div class="card">
@@ -427,8 +428,31 @@
             <p style="font-size:11px;color:#94a3b8">* Las salidas se registran después, una por una desde el menú "Salidas".</p>
           </div>
         </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><h3>📄 Importar desde Factura PDF</h3></div>
+          <div class="card-body">
+            <div class="import-zone" onclick="document.getElementById('pdf-input').click()" style="border-color:#f97316;background:#fff7ed">
+              <input type="file" id="pdf-input" style="display:none" accept=".pdf" onchange="handlePdfImport(event)">
+              <div style="font-size:38px">📄</div>
+              <h4 style="color:#c2410c">Cargar factura PDF del proveedor</h4>
+              <p>Detecta automáticamente los materiales, cantidades y unidades</p>
+            </div>
+            <div id="pdf-preview-wrap" style="display:none;margin-top:14px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <h4 id="pdf-count-label" style="font-size:14px;font-weight:700"></h4>
+                <div style="display:flex;gap:7px">
+                  <button class="btn btn-outline btn-sm" onclick="clearPdfImport()">✕ Cancelar</button>
+                  <button class="btn btn-success" onclick="confirmPdfImport()">✅ Agregar al inventario</button>
+                </div>
+              </div>
+              <div id="pdf-source-info" style="font-size:12px;color:#64748b;margin-bottom:8px;padding:8px;background:#f8fafc;border-radius:6px"></div>
+              <div class="table-wrap" id="pdf-preview"></div>
+            </div>
+          </div>
+        </div>
+ 
         <div class="card">
-          <div class="card-header"><h3>Seleccionar archivo</h3></div>
+          <div class="card-header"><h3>📊 Importar desde Excel</h3></div>
           <div class="card-body">
             <div class="import-zone" onclick="document.getElementById('file-input').click()">
               <input type="file" id="file-input" style="display:none" accept=".xlsx,.xls,.csv" onchange="handleImport(event)">
@@ -1134,6 +1158,159 @@ async function confirmImport(){
   finally{ btn.disabled=false; btn.textContent='✅ Importar todos'; }
 }
 function clearImport(){ importData=[]; document.getElementById('import-preview-wrap').style.display='none'; document.getElementById('file-input').value=''; }
+ 
+// ── IMPORTAR DESDE PDF ──
+let pdfImportData=[];
+ 
+async function handlePdfImport(e){
+  const file=e.target.files[0]; if(!file) return;
+  toast('📄 Leyendo factura...','info');
+  try{
+    if(typeof pdfjsLib==='undefined') throw new Error('PDF.js no cargó. Verificá tu conexión.');
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const arrayBuffer=await file.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+    let fullText='';
+    const lines=[];
+    for(let p=1;p<=pdf.numPages;p++){
+      const page=await pdf.getPage(p);
+      const tc=await page.getTextContent();
+      // Agrupar items por línea (Y similar)
+      const items=tc.items.sort((a,b)=>b.transform[5]-a.transform[5]||a.transform[4]-b.transform[4]);
+      let lastY=null, currentLine=[];
+      for(const item of items){
+        const y=Math.round(item.transform[5]);
+        if(lastY!==null && Math.abs(y-lastY)>3){ lines.push(currentLine); currentLine=[]; }
+        currentLine.push({text:item.str.trim(),x:item.transform[4],y});
+        lastY=y;
+      }
+      if(currentLine.length) lines.push(currentLine);
+    }
+ 
+    // Detectar proveedor
+    const allText=lines.map(l=>l.map(i=>i.text).join(' ')).join('\n');
+    let proveedor='';
+    const provMatch=allText.match(/^(.+?)[\n\r]|Constructora\s+\w+|Proveedor[:\s]+(.+)/im);
+    if(provMatch) proveedor=provMatch[1]||provMatch[2]||'';
+ 
+    // Detectar fecha de factura
+    let fechaFactura=null;
+    const fechaMatch=allText.match(/Fecha\s+documento[:\s]+(\d{1,2}\/\d{2}\/\d{4})/i)||allText.match(/(\d{1,2}\/\d{2}\/\d{4})/);
+    if(fechaMatch) fechaFactura=parseImportDate(fechaMatch[1]);
+ 
+    // Buscar tabla: encabezado con "Concepto" o "Descripcion" + "Cantidad"
+    pdfImportData=[];
+    let tableStarted=false;
+    let colConcepto=-1,colUnidad=-1,colCantidad=-1,colCodigo=-1;
+ 
+    for(let li=0;li<lines.length;li++){
+      const lineTexts=lines[li].map(i=>i.text.toLowerCase());
+      const lineJoined=lineTexts.join(' ');
+ 
+      // Detectar fila de encabezado de tabla
+      if(!tableStarted && (lineJoined.includes('concepto')||lineJoined.includes('descripci'))){
+        const xs=lines[li].map(i=>i.x);
+        lines[li].forEach((item,idx)=>{
+          const t=item.text.toLowerCase();
+          if(t.includes('concepto')||t.includes('descripci')||t.includes('detalle')) colConcepto=idx;
+          else if(t.includes('unidad')||t==='und'||t==='u.m') colUnidad=idx;
+          else if(t.includes('cantidad')||t==='cant'||t==='qty') colCantidad=idx;
+          else if(t.includes('codigo')||t.includes('código')||t==='cod') colCodigo=idx;
+        });
+        tableStarted=true;
+        continue;
+      }
+ 
+      if(!tableStarted) continue;
+ 
+      // Fin de tabla si línea contiene totales
+      if(lineJoined.includes('subtotal')||lineJoined.includes('total')&&lineJoined.includes('¢')||lineJoined.includes('importe total')) break;
+ 
+      // Intentar extraer fila de datos
+      const cells=lines[li].map(i=>i.text);
+      if(!cells.length||cells.every(c=>!c)) continue;
+ 
+      // Buscar número de cantidad en la línea (patrón: número con decimales)
+      let concepto='',unidad='',cantidad=0;
+ 
+      // Método 1: usar índices de columna detectados
+      if(colConcepto>=0 && colCantidad>=0 && cells.length>Math.max(colConcepto,colCantidad)){
+        concepto=cells[colConcepto]||'';
+        cantidad=parseNum(cells[colCantidad]);
+        if(colUnidad>=0) unidad=cells[colUnidad]||'';
+      } else {
+        // Método 2: heurístico — buscar patrón [texto] [unidad?] [número]
+        const numMatches=cells.map((c,i)=>({i,v:parseNum(c),raw:c})).filter(x=>x.v>0&&/^\d/.test(x.raw));
+        if(!numMatches.length) continue;
+        // La cantidad suele ser el primer número positivo razonable (>0 y <100000)
+        const cantCell=numMatches.find(x=>x.v>0&&x.v<100000);
+        if(!cantCell) continue;
+        cantidad=cantCell.v;
+        // El concepto es el texto más largo antes del número
+        const beforeNum=cells.slice(0,cantCell.i);
+        concepto=beforeNum.filter(c=>c&&!/^\d+$/.test(c)&&c.length>2).join(' ').trim();
+        // Unidad: buscar celda corta (2-3 chars) que sea texto
+        const unidadCell=cells.find(c=>c&&c.length<=4&&/^[A-Za-z]+$/.test(c)&&!['de','la','el','los'].includes(c.toLowerCase()));
+        if(unidadCell) unidad=unidadCell;
+      }
+ 
+      concepto=concepto.replace(/\s+/g,' ').trim();
+      if(!concepto||concepto.length<3||cantidad<=0) continue;
+      // Filtrar líneas que son claramente datos de encabezado o totales
+      if(/^(información|boleta|proyecto|estimaci)/i.test(concepto)) continue;
+ 
+      pdfImportData.push({ material:concepto, existencia:cantidad, salida:0, unidad, fechaIngreso:fechaFactura||new Date(), responsable:'', notas:`Factura: ${file.name}` });
+    }
+ 
+    if(!pdfImportData.length){
+      // Fallback: buscar patrón general de [descripción] [M3/UND/etc] [número]
+      const unitPattern=/\b(M3|ML|M2|UND|KG|TON|LTS?|GLS?|MTS?|CMS?|PZA|PAQ)\b/i;
+      const numPattern=/\b(\d{1,6}(?:[.,]\d{1,3})?)\b/;
+      for(const line of lines){
+        const txt=line.map(i=>i.text).join(' ');
+        if(!unitPattern.test(txt)) continue;
+        const unitM=txt.match(unitPattern);
+        const numM=txt.match(/(\d+(?:[.,]\d+)?)\s*$/);
+        if(!unitM||!numM) continue;
+        const cantidad=parseNum(numM[1]);
+        if(cantidad<=0) continue;
+        const concepto=txt.replace(unitPattern,'').replace(numPattern,'').replace(/\s+/g,' ').trim();
+        if(concepto.length<3) continue;
+        pdfImportData.push({ material:concepto, existencia:cantidad, salida:0, unidad:unitM[1].toUpperCase(), fechaIngreso:fechaFactura||new Date(), responsable:'', notas:`Factura: ${file.name}` });
+      }
+    }
+ 
+    if(!pdfImportData.length) return toast('⚠️ No se encontraron materiales en el PDF. Verificá que sea una factura con tabla de productos.','error');
+ 
+    document.getElementById('pdf-source-info').innerHTML=`📄 <b>${file.name}</b>${proveedor?' · Proveedor: <b>'+esc(proveedor.slice(0,60))+'</b>':''}${fechaFactura?' · Fecha: <b>'+fechaFactura.toLocaleDateString('es')+'</b>':''}`;
+    setText('pdf-count-label',`${pdfImportData.length} material${pdfImportData.length!==1?'es':''} detectado${pdfImportData.length!==1?'s':''} — Revisá antes de importar`);
+    document.getElementById('pdf-preview').innerHTML=`<table><thead><tr><th>#</th><th>Material detectado</th><th>Unidad</th><th>Cantidad</th></tr></thead><tbody>${pdfImportData.map((r,i)=>`<tr><td style="color:#94a3b8">${i+1}</td><td><b>${esc(r.material)}</b></td><td>${esc(r.unidad)||'—'}</td><td><b>${r.existencia}</b></td></tr>`).join('')}</tbody></table>`;
+    document.getElementById('pdf-preview-wrap').style.display='block';
+  }catch(err){ toast('❌ Error al leer PDF: '+err.message,'error'); console.error(err); }
+  finally{ document.getElementById('pdf-input').value=''; }
+}
+ 
+async function confirmPdfImport(){
+  if(!pdfImportData.length) return;
+  const btn=event.target; btn.disabled=true; btn.textContent='Importando...';
+  try{
+    const chunks=[];
+    for(let i=0;i<pdfImportData.length;i+=499) chunks.push(pdfImportData.slice(i,i+499));
+    for(const chunk of chunks){
+      const batch=db.batch();
+      chunk.forEach(r=>{
+        const ref=db.collection('inventario').doc();
+        batch.set(ref,{...r,creadoPor:currentUser.email,creadoEn:firebase.firestore.FieldValue.serverTimestamp(),actualizadoEn:firebase.firestore.FieldValue.serverTimestamp()});
+      });
+      await batch.commit();
+    }
+    toast(`✅ ${pdfImportData.length} materiales de la factura importados`,'success');
+    clearPdfImport(); await loadAllData(); goPage('inventario');
+  }catch(e){ toast('❌ Error: '+e.message,'error'); }
+  finally{ btn.disabled=false; btn.textContent='✅ Agregar al inventario'; }
+}
+ 
+function clearPdfImport(){ pdfImportData=[]; document.getElementById('pdf-preview-wrap').style.display='none'; }
  
 async function confirmarBorrarTodo(){
   const confirmar = prompt('⚠️ Esto borrará TODO el inventario y TODAS las salidas.\n\nEscribí BORRAR para confirmar:');
