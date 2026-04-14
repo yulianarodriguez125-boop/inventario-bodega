@@ -438,15 +438,18 @@
               <p>Detecta automáticamente los materiales, cantidades y unidades</p>
             </div>
             <div id="pdf-preview-wrap" style="display:none;margin-top:14px">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <h4 id="pdf-count-label" style="font-size:14px;font-weight:700"></h4>
+              <div id="pdf-source-info" style="font-size:12px;color:#64748b;margin-bottom:10px;padding:10px;background:#fff7ed;border-radius:8px;border-left:4px solid #f97316"></div>
+              <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#854d0e">
+                ✏️ <b>Revisá y corregí los datos antes de guardar.</b> Podés editar directamente cualquier celda, eliminar filas o agregar materiales nuevos.
+              </div>
+              <div class="table-wrap" id="pdf-preview"></div>
+              <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                <button class="btn btn-outline btn-sm" onclick="addPdfRow()" style="border-color:#16a34a;color:#16a34a">➕ Agregar fila</button>
                 <div style="display:flex;gap:7px">
                   <button class="btn btn-outline btn-sm" onclick="clearPdfImport()">✕ Cancelar</button>
-                  <button class="btn btn-success" onclick="confirmPdfImport()">✅ Agregar al inventario</button>
+                  <button class="btn btn-success" onclick="confirmPdfImport()">✅ Guardar en inventario</button>
                 </div>
               </div>
-              <div id="pdf-source-info" style="font-size:12px;color:#64748b;margin-bottom:8px;padding:8px;background:#f8fafc;border-radius:6px"></div>
-              <div class="table-wrap" id="pdf-preview"></div>
             </div>
           </div>
         </div>
@@ -1282,20 +1285,67 @@ async function handlePdfImport(e){
  
     if(!pdfImportData.length) return toast('⚠️ No se encontraron materiales en el PDF. Verificá que sea una factura con tabla de productos.','error');
  
-    document.getElementById('pdf-source-info').innerHTML=`📄 <b>${file.name}</b>${proveedor?' · Proveedor: <b>'+esc(proveedor.slice(0,60))+'</b>':''}${fechaFactura?' · Fecha: <b>'+fechaFactura.toLocaleDateString('es')+'</b>':''}`;
-    setText('pdf-count-label',`${pdfImportData.length} material${pdfImportData.length!==1?'es':''} detectado${pdfImportData.length!==1?'s':''} — Revisá antes de importar`);
-    document.getElementById('pdf-preview').innerHTML=`<table><thead><tr><th>#</th><th>Material detectado</th><th>Unidad</th><th>Cantidad</th></tr></thead><tbody>${pdfImportData.map((r,i)=>`<tr><td style="color:#94a3b8">${i+1}</td><td><b>${esc(r.material)}</b></td><td>${esc(r.unidad)||'—'}</td><td><b>${r.existencia}</b></td></tr>`).join('')}</tbody></table>`;
+    document.getElementById('pdf-source-info').innerHTML=`📄 <b>${esc(file.name)}</b>${proveedor?' &nbsp;·&nbsp; Proveedor: <b>'+esc(proveedor.slice(0,60))+'</b>':''}${fechaFactura?' &nbsp;·&nbsp; Fecha: <b>'+fechaFactura.toLocaleDateString('es')+'</b>':''} &nbsp;·&nbsp; <b>${pdfImportData.length}</b> material${pdfImportData.length!==1?'es':''} detectado${pdfImportData.length!==1?'s':''}`;
+    renderPdfTable();
     document.getElementById('pdf-preview-wrap').style.display='block';
   }catch(err){ toast('❌ Error al leer PDF: '+err.message,'error'); console.error(err); }
   finally{ document.getElementById('pdf-input').value=''; }
 }
  
+function renderPdfTable(){
+  const tbody = pdfImportData.map((r,i)=>`
+    <tr id="pdf-row-${i}">
+      <td style="color:#94a3b8;font-size:12px;width:28px">${i+1}</td>
+      <td><input value="${esc(r.material)}" oninput="pdfImportData[${i}].material=this.value"
+        style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;font-size:13px;font-weight:600"></td>
+      <td><input value="${esc(r.unidad||'')}" oninput="pdfImportData[${i}].unidad=this.value" placeholder="Ej: M3"
+        style="width:80px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;font-size:13px;text-align:center"></td>
+      <td><input type="number" value="${r.existencia}" min="0" step="any" oninput="pdfImportData[${i}].existencia=parseFloat(this.value)||0"
+        style="width:90px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;font-size:13px;font-weight:700;text-align:right"></td>
+      <td><button onclick="removePdfRow(${i})" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:16px;padding:2px 6px" title="Eliminar fila">🗑️</button></td>
+    </tr>`).join('');
+  document.getElementById('pdf-preview').innerHTML=`
+    <table style="width:100%">
+      <thead><tr>
+        <th style="width:28px">#</th>
+        <th>Material</th>
+        <th style="width:90px">Unidad</th>
+        <th style="width:100px">Cantidad</th>
+        <th style="width:40px"></th>
+      </tr></thead>
+      <tbody>${tbody}</tbody>
+    </table>`;
+}
+ 
+function removePdfRow(i){
+  pdfImportData.splice(i,1);
+  if(!pdfImportData.length){ clearPdfImport(); return; }
+  renderPdfTable();
+  document.getElementById('pdf-source-info').innerHTML=document.getElementById('pdf-source-info').innerHTML.replace(/\d+ material/, `${pdfImportData.length} material`);
+}
+ 
+function addPdfRow(){
+  pdfImportData.push({ material:'', existencia:0, salida:0, unidad:'', fechaIngreso:new Date(), responsable:'', notas:'Agregado manualmente' });
+  renderPdfTable();
+  // Focus en el último input de material
+  setTimeout(()=>{ const rows=document.querySelectorAll('#pdf-preview tbody tr'); if(rows.length){ const inp=rows[rows.length-1].querySelector('input'); if(inp) inp.focus(); } },50);
+}
+ 
 async function confirmPdfImport(){
-  if(!pdfImportData.length) return;
-  const btn=event.target; btn.disabled=true; btn.textContent='Importando...';
+  // Leer valores editados directamente del DOM (por si acaso)
+  const rows=document.querySelectorAll('#pdf-preview tbody tr');
+  rows.forEach((row,i)=>{
+    const inputs=row.querySelectorAll('input');
+    if(inputs[0]) pdfImportData[i].material=inputs[0].value.trim();
+    if(inputs[1]) pdfImportData[i].unidad=inputs[1].value.trim();
+    if(inputs[2]) pdfImportData[i].existencia=parseFloat(inputs[2].value)||0;
+  });
+  const valid=pdfImportData.filter(r=>r.material&&r.existencia>0);
+  if(!valid.length) return toast('⚠️ No hay materiales válidos para guardar. Completá nombre y cantidad.','error');
+  const btn=event.target; btn.disabled=true; btn.textContent='Guardando...';
   try{
     const chunks=[];
-    for(let i=0;i<pdfImportData.length;i+=499) chunks.push(pdfImportData.slice(i,i+499));
+    for(let i=0;i<valid.length;i+=499) chunks.push(valid.slice(i,i+499));
     for(const chunk of chunks){
       const batch=db.batch();
       chunk.forEach(r=>{
@@ -1304,10 +1354,10 @@ async function confirmPdfImport(){
       });
       await batch.commit();
     }
-    toast(`✅ ${pdfImportData.length} materiales de la factura importados`,'success');
+    toast(`✅ ${valid.length} materiales guardados en inventario`,'success');
     clearPdfImport(); await loadAllData(); goPage('inventario');
   }catch(e){ toast('❌ Error: '+e.message,'error'); }
-  finally{ btn.disabled=false; btn.textContent='✅ Agregar al inventario'; }
+  finally{ btn.disabled=false; btn.textContent='✅ Guardar en inventario'; }
 }
  
 function clearPdfImport(){ pdfImportData=[]; document.getElementById('pdf-preview-wrap').style.display='none'; }
@@ -1431,3 +1481,4 @@ initApp();
 </script>
 </body>
 </html>
+ 
